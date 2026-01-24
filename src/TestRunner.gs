@@ -35,6 +35,26 @@ const TestRunner = (() => {
   }
 
   /**
+   * Parse URL query parameters (Apps Script compatible, no URL constructor)
+   */
+  function parseUrlParams_(url) {
+    const params = {};
+    const queryStart = url.indexOf('?');
+    if (queryStart === -1) return params;
+    
+    const queryString = url.substring(queryStart + 1);
+    const pairs = queryString.split('&');
+    
+    for (let i = 0; i < pairs.length; i++) {
+      const pair = pairs[i].split('=');
+      if (pair.length === 2) {
+        params[decodeURIComponent(pair[0])] = decodeURIComponent(pair[1]);
+      }
+    }
+    return params;
+  }
+
+  /**
    * Test schema enforcement
    */
   function testSchemaEnforcement() {
@@ -87,14 +107,8 @@ const TestRunner = (() => {
       assert(url.includes('brand=TestBrand'), 'Signed URL contains brand');
       assert(url.includes('page=otp_request'), 'Signed URL contains page');
       
-      // Test partial signature verification
-      const urlObj = new URL(url);
-      const partialParams = {
-        brand: urlObj.searchParams.get('brand'),
-        rowId: urlObj.searchParams.get('rowId'),
-        ts: urlObj.searchParams.get('ts'),
-        sig: urlObj.searchParams.get('sig')
-      };
+      // Test partial signature verification (Apps Script compatible URL parsing)
+      const partialParams = parseUrlParams_(url);
       
       const partialResult = InviteSigning.verifyPartialSignature(partialParams);
       assert(partialResult.valid, 'Partial signature verification passes');

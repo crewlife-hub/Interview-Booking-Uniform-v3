@@ -40,6 +40,17 @@ const InviteSigning = (() => {
    * @param {string} params.textForEmail - Text for email value
    * @returns {string} Signed URL
    */
+  /**
+   * Build a URL with query parameters (Apps Script compatible)
+   */
+  function buildUrlWithParams_(baseUrl, params) {
+    var keys = Object.keys(params);
+    var qs = keys.map(function(k) {
+      return encodeURIComponent(k) + '=' + encodeURIComponent(String(params[k]));
+    }).join('&');
+    return baseUrl + (baseUrl.indexOf('?') >= 0 ? '&' : '?') + qs;
+  }
+
   function createSignedInviteUrl(params) {
     const { brand, rowId, email, textForEmail } = params;
     const ts = Date.now();
@@ -51,15 +62,16 @@ const InviteSigning = (() => {
     // Get web app URL
     const webAppUrl = ScriptApp.getService().getUrl();
     
-    // Build URL with parameters
-    const url = new URL(webAppUrl);
-    url.searchParams.set('page', 'otp_request');
-    url.searchParams.set('brand', brand);
-    url.searchParams.set('rowId', rowId);
-    url.searchParams.set('ts', ts);
-    url.searchParams.set('sig', sig);
+    // Build URL with parameters using Apps Script compatible helper
+    const urlParams = {
+      page: 'otp_request',
+      brand: brand,
+      rowId: rowId,
+      ts: ts,
+      sig: sig
+    };
     
-    return url.toString();
+    return buildUrlWithParams_(webAppUrl, urlParams);
   }
 
   /**
