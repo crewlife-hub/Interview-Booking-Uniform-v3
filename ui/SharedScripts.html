@@ -1,0 +1,139 @@
+<script>
+  /**
+   * Shared JavaScript utilities for Interview Booking System
+   */
+  
+  // Form submission helper
+  function submitForm(form, action, callback) {
+    const btn = form.querySelector('button[type="submit"]');
+    const originalContent = btn.innerHTML;
+    
+    // Disable button and show spinner
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span> Processing...';
+    
+    // Clear previous errors
+    clearErrors(form);
+    
+    // Build form data
+    const formData = new FormData(form);
+    const params = new URLSearchParams();
+    params.append('action', action);
+    
+    for (const [key, value] of formData) {
+      params.append(key, value);
+    }
+    
+    // Submit via fetch
+    fetch(window.location.href.split('?')[0], {
+      method: 'POST',
+      body: params,
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded'
+      }
+    })
+    .then(response => response.json())
+    .then(data => {
+      btn.disabled = false;
+      btn.innerHTML = originalContent;
+      callback(null, data);
+    })
+    .catch(error => {
+      btn.disabled = false;
+      btn.innerHTML = originalContent;
+      callback(error, null);
+    });
+  }
+  
+  // Show error message
+  function showError(message) {
+    let alertBox = document.querySelector('.alert-error');
+    if (!alertBox) {
+      alertBox = document.createElement('div');
+      alertBox.className = 'alert alert-error';
+      const form = document.querySelector('form') || document.querySelector('.card');
+      form.insertBefore(alertBox, form.firstChild);
+    }
+    alertBox.textContent = message;
+    alertBox.style.display = 'block';
+  }
+  
+  // Show success message
+  function showSuccess(message) {
+    let alertBox = document.querySelector('.alert-success');
+    if (!alertBox) {
+      alertBox = document.createElement('div');
+      alertBox.className = 'alert alert-success';
+      const form = document.querySelector('form') || document.querySelector('.card');
+      form.insertBefore(alertBox, form.firstChild);
+    }
+    alertBox.textContent = message;
+    alertBox.style.display = 'block';
+  }
+  
+  // Clear all error messages
+  function clearErrors(form) {
+    const alerts = form.querySelectorAll('.alert');
+    alerts.forEach(a => a.remove());
+    
+    const errorInputs = form.querySelectorAll('.error');
+    errorInputs.forEach(input => input.classList.remove('error'));
+    
+    const errorMessages = form.querySelectorAll('.error-message');
+    errorMessages.forEach(msg => msg.remove());
+  }
+  
+  // Validate email format
+  function isValidEmail(email) {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+  }
+  
+  // Format time remaining
+  function formatTimeRemaining(ms) {
+    if (ms <= 0) return 'Expired';
+    
+    const minutes = Math.floor(ms / 60000);
+    const seconds = Math.floor((ms % 60000) / 1000);
+    
+    if (minutes > 0) {
+      return `${minutes}m ${seconds}s remaining`;
+    }
+    return `${seconds}s remaining`;
+  }
+  
+  // Redirect with message
+  function redirectTo(url) {
+    window.location.href = url;
+  }
+  
+  // Auto-focus first input on page load
+  document.addEventListener('DOMContentLoaded', function() {
+    const firstInput = document.querySelector('input:not([type="hidden"]), select');
+    if (firstInput) {
+      firstInput.focus();
+    }
+  });
+  
+  // OTP input formatting - auto advance and allow only numbers
+  function setupOtpInput(inputId) {
+    const input = document.getElementById(inputId);
+    if (!input) return;
+    
+    input.addEventListener('input', function(e) {
+      // Remove non-numeric characters
+      this.value = this.value.replace(/[^0-9]/g, '');
+      
+      // Limit to 6 characters
+      if (this.value.length > 6) {
+        this.value = this.value.slice(0, 6);
+      }
+    });
+    
+    input.addEventListener('keypress', function(e) {
+      // Only allow numbers
+      if (!/[0-9]/.test(e.key)) {
+        e.preventDefault();
+      }
+    });
+  }
+</script>
