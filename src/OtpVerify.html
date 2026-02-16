@@ -1,0 +1,497 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Verify OTP – <?= brandName ?></title>
+  <?!= include_('Styles'); ?>
+  <style>
+    .hero-banner {
+      background: linear-gradient(135deg, #1a237e, #0d47a1);
+      padding: 30px 20px;
+      text-align: center;
+      color: white;
+    }
+    .hero-banner h2 {
+      margin: 10px 0;
+      font-size: 20px;
+    }
+    .otp-input-container {
+      display: flex;
+      justify-content: center;
+      gap: 10px;
+      margin: 30px 0;
+    }
+    .otp-input {
+      width: 50px;
+      height: 60px;
+      font-size: 28px;
+      text-align: center;
+      border: 2px solid #ddd;
+      border-radius: 8px;
+      outline: none;
+    }
+    .otp-input:focus {
+      border-color: #0d6efd;
+      box-shadow: 0 0 0 3px rgba(13, 110, 253, 0.25);
+    }
+    .success-box {
+      background: #d4edda;
+      border: 1px solid #c3e6cb;
+      border-radius: 8px;
+      padding: 30px;
+      text-align: center;
+      margin: 20px 0;
+    }
+    .success-box h2 {
+      color: #155724;
+      margin: 0 0 15px 0;
+    }
+    .booking-info {
+      background: #e3f2fd;
+      border-radius: 8px;
+      padding: 20px;
+      margin: 20px 0;
+    }
+    .spinner {
+      display: inline-block;
+      width: 20px;
+      height: 20px;
+      border: 3px solid rgba(255,255,255,.3);
+      border-radius: 50%;
+      border-top-color: #fff;
+      animation: spin 1s ease-in-out infinite;
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+  </style>
+</head>
+<body>
+  <div class="hero-banner">
+    <div style="font-size: 40px;">🔐</div>
+    <h2>VERIFY YOUR PASSCODE</h2>
+    <p>Crew Life at Sea</p>
+  </div>
+  
+  <div class="container">
+    <div class="card" style="max-width: 500px; margin: 20px auto;">
+      
+      <div id="verifySection">
+        <h3 style="text-align: center;">Enter Your 6-Digit Passcode</h3>
+        <p style="text-align: center; color: #666;">
+          We sent a passcode to <strong><?= email ?></strong>
+        </p>
+        
+        <div class="otp-input-container">
+          <input type="text" class="otp-input" maxlength="1" id="otp1" autofocus>
+          <input type="text" class="otp-input" maxlength="1" id="otp2">
+          <input type="text" class="otp-input" maxlength="1" id="otp3">
+          <input type="text" class="otp-input" maxlength="1" id="otp4">
+          <input type="text" class="otp-input" maxlength="1" id="otp5">
+          <input type="text" class="otp-input" maxlength="1" id="otp6">
+        </div>
+        
+        <div id="errorMsg" class="alert alert-danger hidden"></div>
+        <div style="text-align:center; margin-top:10px;">
+          <a id="openDeployedBtn" class="btn btn-outline-primary hidden" href="#" target="_blank" style="padding:10px 18px; font-size:14px; text-decoration:none;">Open deployed app in new tab</a>
+        </div>
+        
+        <div style="text-align: center;">
+          <button type="button" id="btnVerify" class="btn btn-primary" onclick="verifyOtp()" style="padding: 15px 40px; font-size: 18px;">
+            ✅ Verify
+          </button>
+        </div>
+        
+        <p style="text-align: center; margin-top: 20px; color: #666;">
+          Didn't receive the code? <a href="javascript:history.back()">Request new OTP</a>
+        </p>
+      </div>
+      
+      <div id="successSection" class="hidden">
+        <div class="success-box">
+          <h2>🎉 Congratulations!</h2>
+          <p>Your passcode has been verified successfully.</p>
+          <p id="emailSentMsg" class="hidden" style="color: #155724; font-weight: 500;">
+            📧 We've also sent you an email with the booking link.
+          </p>
+        </div>
+        
+        <div class="booking-info">
+          <p><strong>Position:</strong> <span id="positionText"><?= textForEmail ?></span></p>
+          <p id="recruiterInfo" class="hidden"><strong>Recruiter:</strong> <span id="recruiterName"></span></p>
+        </div>
+        
+        <p style="text-align: center; color: #666;">
+          <strong>Please note:</strong> This booking link is valid for 10 minutes and can only be used once.
+        </p>
+        
+        <div style="text-align: center; margin: 20px 0;">
+          <a href="#" id="bookingLink" class="btn btn-success" style="padding: 15px 40px; font-size: 18px; text-decoration: none;">
+            📅 Schedule Your Interview
+          </a>
+        </div>
+      </div>
+      
+      <div id="errorSection" class="hidden">
+        <div class="alert alert-danger">
+          <h4>⚠️ Booking URL Not Found</h4>
+          <p id="clErrorMsg"></p>
+          <p>Please contact your recruiter for assistance.</p>
+        </div>
+      </div>
+
+      <!-- Iframe block warning -->
+      <div id="iframeWarning" class="hidden" style="background: #fff3cd; border: 1px solid #ffc107; border-radius: 8px; padding: 20px; margin: 20px 0; text-align: center;">
+        <h4 style="color: #856404;">⚠️ Embedded Mode Detected</h4>
+        <p>This page is running in an iframe or preview. Server calls may fail.</p>
+        <a id="iframeOpenBtn" class="btn btn-primary" href="#" target="_blank" style="text-decoration: none;">Open in Full Window</a>
+      </div>
+
+      <!-- Debug section - hidden by default, click to reveal -->
+      <div style="margin-top: 20px; text-align: center;">
+        <a href="#" onclick="toggleDebug(); return false;" style="font-size: 12px; color: #999;">🔧 Show debug info</a>
+      </div>
+      <div id="debugSection" class="hidden" style="margin-top: 10px; padding: 15px; background: #f8f9fa; border-radius: 8px;">
+        <h4 style="margin: 0 0 10px 0; font-size: 14px; color: #666;">🔧 Debug: Server Response</h4>
+        <textarea id="serverResponseText" readonly style="width: 100%; height: 120px; padding: 8px; font-family: monospace; font-size: 11px; border: 1px solid #ddd; border-radius: 4px; background: #fff;"></textarea>
+        <div style="margin-top: 8px; display: flex; gap: 10px;">
+          <button type="button" class="btn btn-outline-secondary" onclick="copyServerResponse()" style="font-size: 12px; padding: 5px 12px;">Copy</button>
+          <span id="copyStatus" style="font-size: 12px; color: #28a745; display: none;">Copied!</span>
+        </div>
+      </div>
+
+      <!-- Debug modal -->
+      <div id="debugModal" class="hidden" style="position: fixed; inset: 0; background: rgba(0,0,0,0.45); display: flex; align-items: center; justify-content: center; z-index: 9999;">
+        <div style="background: #fff; width: 90%; max-width: 560px; border-radius: 10px; padding: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.25);">
+          <h3 style="margin: 0 0 10px 0;">Debug details</h3>
+          <p style="margin: 0 0 10px 0; color: #666;">Copy and paste the text below into chat:</p>
+          <textarea id="debugText" readonly style="width: 100%; height: 140px; padding: 10px; border: 1px solid #ddd; border-radius: 6px; font-family: monospace; font-size: 12px;"></textarea>
+          <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 12px;">
+            <button type="button" class="btn btn-outline-secondary" onclick="copyDebugText()">Copy</button>
+            <button type="button" class="btn btn-primary" onclick="closeDebugModal()">Close</button>
+          </div>
+        </div>
+      </div>
+      
+    </div>
+  </div>
+  
+  <div class="version-tag">v<?= version ?></div>
+  
+  <script>
+    var BRAND = '<?= brand ?>';
+    var EMAIL = '<?= email ?>';
+    var TEXT_FOR_EMAIL = '<?= textForEmail ?>';
+    var WEBAPP_URL = '<?= webAppUrl ?>';
+    var TOKEN = '<?= token ?>';  // Unique row identifier for deterministic lookup
+
+    // Track last server response for debugging
+    var lastServerResponse = null;
+
+    function updateServerResponseDebug(data) {
+      lastServerResponse = data;
+      var el = document.getElementById('serverResponseText');
+      if (el) {
+        try {
+          el.value = typeof data === 'string' ? data : JSON.stringify(data, null, 2);
+        } catch (e) {
+          el.value = String(data);
+        }
+      }
+    }
+
+    function copyServerResponse() {
+      var el = document.getElementById('serverResponseText');
+      if (!el) return;
+      el.select();
+      try {
+        document.execCommand('copy');
+        var status = document.getElementById('copyStatus');
+        if (status) {
+          status.style.display = 'inline';
+          setTimeout(function() { status.style.display = 'none'; }, 2000);
+        }
+      } catch (e) {}
+    }
+
+    function toggleDebug() {
+      var section = document.getElementById('debugSection');
+      if (section) {
+        section.classList.toggle('hidden');
+      }
+    }
+
+    function isInIframe() {
+      // Apps Script always runs in sandboxFrame iframe - this is normal
+      // Only return true for external iframes (not Apps Script's own sandbox)
+      try {
+        // If we can access top and it's a different origin, we're in an external iframe
+        var sameOrigin = window.top.location.href;
+        return false; // Same origin, this is just Apps Script sandbox
+      } catch (e) {
+        // Cross-origin - could be external iframe
+        return true;
+      }
+    }
+
+    function checkIframeAndWarn() {
+      // Disabled - Apps Script's sandboxFrame always triggers false positives
+      // Only warn if server calls actually fail
+    }
+
+    function canCallServer_() {
+      try {
+        // Check if google.script.run exists and has the method
+        if (window.google && google.script && google.script.run) {
+          // Don't check for specific function - just check run exists
+          return true;
+        }
+        return false;
+      } catch (e) {
+        console.error('[canCallServer_] Error:', e);
+        return false;
+      }
+    }
+
+    function buildDeployedVerifyUrl_(includeRedirectFlag) {
+      var base = String(WEBAPP_URL || '').trim();
+      if (!base) return '';
+      try {
+        var deployed = new URL(base);
+        var current = new URL(window.location.href);
+
+        // Keep any existing query params (if user came in with them)
+        current.searchParams.forEach(function(v, k) {
+          deployed.searchParams.set(k, v);
+        });
+
+        // Ensure required params
+        if (!deployed.searchParams.get('page')) deployed.searchParams.set('page', 'verify');
+        if (BRAND) deployed.searchParams.set('brand', BRAND);
+        if (EMAIL) deployed.searchParams.set('e', EMAIL);
+        if (TEXT_FOR_EMAIL) deployed.searchParams.set('t', TEXT_FOR_EMAIL);
+        if (TOKEN) deployed.searchParams.set('token', TOKEN);
+
+        if (includeRedirectFlag) deployed.searchParams.set('redirected', '1');
+        else deployed.searchParams.delete('redirected');
+
+        return deployed.toString();
+      } catch (e) {
+        return '';
+      }
+    }
+
+    function showOpenDeployedBtn_(url) {
+      try {
+        var openBtn = document.getElementById('openDeployedBtn');
+        if (openBtn && url) {
+          openBtn.href = url;
+          openBtn.classList.remove('hidden');
+        }
+      } catch (e) {}
+    }
+
+    function ensureDeployedContext_() {
+      // Just log context info - no auto-redirects or warnings that block functionality
+      console.log('[ensureDeployedContext_] URL:', window.location.href);
+      console.log('[ensureDeployedContext_] canCallServer:', canCallServer_());
+      // Don't show any warnings or buttons on load - let user try to verify first
+    }
+    
+    // OTP input handling - auto-focus next input
+    document.querySelectorAll('.otp-input').forEach(function(input, index) {
+      input.addEventListener('input', function(e) {
+        var value = e.target.value;
+        if (value.length === 1) {
+          var next = document.getElementById('otp' + (index + 2));
+          if (next) next.focus();
+        }
+      });
+      
+      input.addEventListener('keydown', function(e) {
+        if (e.key === 'Backspace' && !e.target.value) {
+          var prev = document.getElementById('otp' + index);
+          if (prev) prev.focus();
+        }
+      });
+      
+      // Allow paste
+      input.addEventListener('paste', function(e) {
+        e.preventDefault();
+        var paste = (e.clipboardData || window.clipboardData).getData('text').replace(/\D/g, '').substring(0, 6);
+        for (var i = 0; i < paste.length; i++) {
+          var inp = document.getElementById('otp' + (i + 1));
+          if (inp) inp.value = paste[i];
+        }
+        if (paste.length === 6) {
+          document.getElementById('otp6').focus();
+        }
+      });
+    });
+
+    window.addEventListener('load', function() {
+      checkIframeAndWarn();
+      ensureDeployedContext_();
+    });
+    
+    function getOtpValue() {
+      var otp = '';
+      for (var i = 1; i <= 6; i++) {
+        otp += document.getElementById('otp' + i).value;
+      }
+      return otp;
+    }
+    
+    var VERIFY_TIMEOUT_MS = 15000;
+    var verifyTimeoutId = null;
+
+    function clearVerifyTimeout() {
+      if (verifyTimeoutId) {
+        clearTimeout(verifyTimeoutId);
+        verifyTimeoutId = null;
+      }
+    }
+
+    function onVerifyTimeout(btn) {
+      btn.disabled = false;
+      btn.innerHTML = '✅ Verify';
+      showError('Request timed out. Please try again.');
+    }
+
+    function verifyOtp() {
+      var otp = getOtpValue();
+      if (otp.length !== 6) {
+        showError('Please enter all 6 digits');
+        return;
+      }
+      
+      var btn = document.getElementById('btnVerify');
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner"></span> Verifying...';
+      
+      document.getElementById('errorMsg').classList.add('hidden');
+
+      // Start client-side timeout to avoid UI hanging
+      verifyTimeoutId = setTimeout(function() { onVerifyTimeout(btn); }, VERIFY_TIMEOUT_MS);
+
+      // Just try to call the server - don't pre-check
+      try {
+        google.script.run
+          .withSuccessHandler(function(result) {
+          clearVerifyTimeout();
+          btn.disabled = false;
+          btn.innerHTML = '✅ Verify';
+
+          // Always log result to debug textarea
+          updateServerResponseDebug(result);
+
+          if (result.ok && result.verified) {
+            if (result.bookingUrl) {
+              showSuccess(result);
+            } else {
+              showClError(result.error || 'Booking URL not configured for this position');
+            }
+          } else {
+            // Build detailed error message with diagnostics
+            var errMsg = result.error || 'Verification failed';
+            if (result.diag && result.diag.steps) {
+              errMsg += '\n\n[Trace: ' + (result.diag.traceId || 'unknown') + ']\n';
+              for (var s = 0; s < result.diag.steps.length; s++) {
+                var step = result.diag.steps[s];
+                errMsg += step.step + ': ' + JSON.stringify(step.data) + '\n';
+              }
+            }
+            showError(errMsg);
+          }
+          })
+          .withFailureHandler(function(err) {
+            clearVerifyTimeout();
+            btn.disabled = false;
+            btn.innerHTML = '✅ Verify';
+            var errData = { error: err.message || String(err), stack: err.stack || null };
+            updateServerResponseDebug(errData);
+            showError(err.message || 'An error occurred');
+          })
+          .otpVerifyApi({
+            token: TOKEN,  // Primary key for deterministic lookup
+            brand: BRAND,
+            email: EMAIL,
+            otp: otp,
+            textForEmail: TEXT_FOR_EMAIL
+          }, 'web-' + Date.now());
+      } catch (e) {
+        // Some environments (devtools, cross-origin previews) can throw synchronously.
+        clearVerifyTimeout();
+        btn.disabled = false;
+        btn.innerHTML = '✅ Verify';
+        showError('Client error: ' + (e && e.message ? e.message : String(e)));
+        console.error('google.script.run invocation failed', e);
+      }
+    }
+    
+    function openDebugModal(msg) {
+      var modal = document.getElementById('debugModal');
+      var text = document.getElementById('debugText');
+      if (modal && text) {
+        text.value = msg || '';
+        modal.classList.remove('hidden');
+      }
+    }
+
+    function closeDebugModal() {
+      var modal = document.getElementById('debugModal');
+      if (modal) modal.classList.add('hidden');
+    }
+
+    function copyDebugText() {
+      var text = document.getElementById('debugText');
+      if (!text) return;
+      text.select();
+      try {
+        document.execCommand('copy');
+      } catch (e) {}
+    }
+
+    function showError(msg) {
+      var errorEl = document.getElementById('errorMsg');
+      errorEl.textContent = msg;
+      errorEl.classList.remove('hidden');
+
+      // Also show modal with debug details for easy copy
+      openDebugModal(msg);
+      
+      // Clear inputs
+      for (var i = 1; i <= 6; i++) {
+        document.getElementById('otp' + i).value = '';
+      }
+      document.getElementById('otp1').focus();
+    }
+    
+    function showSuccess(result) {
+      document.getElementById('verifySection').classList.add('hidden');
+      document.getElementById('successSection').classList.remove('hidden');
+      
+      if (result.textForEmail) {
+        document.getElementById('positionText').textContent = result.textForEmail;
+      }
+      if (result.recruiterName) {
+        document.getElementById('recruiterName').textContent = result.recruiterName;
+        document.getElementById('recruiterInfo').classList.remove('hidden');
+      }
+      if (result.emailSent) {
+        document.getElementById('emailSentMsg').classList.remove('hidden');
+      }
+      
+      document.getElementById('bookingLink').href = result.bookingUrl;
+    }
+    
+    function showClError(msg) {
+      document.getElementById('verifySection').classList.add('hidden');
+      document.getElementById('errorSection').classList.remove('hidden');
+      document.getElementById('clErrorMsg').textContent = msg;
+    }
+  </script>
+</body>
+</html>

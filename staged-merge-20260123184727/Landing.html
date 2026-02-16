@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Schedule Your Interview</title>
+  <style>
+    body{font-family:Arial,Helvetica,sans-serif;background:#f5f7fb;margin:0}
+    .card{max-width:720px;margin:50px auto;background:#fff;padding:28px;border-radius:8px;box-shadow:0 6px 24px rgba(0,0,0,0.08)}
+    .cta{display:inline-block;background:#007bff;color:#fff;padding:12px 28px;border-radius:6px;text-decoration:none}
+    .muted{color:#666}
+    .form-row{margin:12px 0}
+    input,select{width:100%;padding:10px;border:1px solid #e6e9ee;border-radius:4px}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1 style="margin-top:0">🎉 Congratulations — You're Almost There</h1>
+    <p class="muted">Click <strong>Book Your Interview</strong> to begin the secure booking flow. You'll be taken to the verification step (OTP) and guided through scheduling.</p>
+
+    <div id="form">
+      <div class="form-row">
+        <label>Brand</label>
+        <select id="brand" onchange="updateDropdowns()">
+          <? var codes = getAllBrandCodes_(); ?>
+          <? for (var i=0;i<codes.length;i++){ ?>
+            <option value="<?= codes[i] ?>"><?= codes[i] ?></option>
+          <? } ?>
+        </select>
+      </div>
+      <div class="form-row">
+        <label>Email</label>
+        <input id="email" type="email" placeholder="you@example.com">
+      </div>
+      <div class="form-row">
+        <label>CL Code</label>
+        <select id="clCode">
+          <option value="">-- Select CL Code --</option>
+        </select>
+      </div>
+      <div class="form-row">
+        <label>Position (Job Title)</label>
+        <select id="jobTitle">
+          <option value="">-- Select Position --</option>
+        </select>
+      </div>
+
+      <div style="text-align:center;margin-top:18px">
+        <a id="bookBtn" class="cta">Book Your Interview</a>
+      </div>
+      <p id="status" style="text-align:center;color:#666;margin-top:12px;font-size:14px"></p>
+    </div>
+  </div>
+
+  <script>
+    // Data passed from server template (use unescaped output for valid JSON)
+    var brandClCodes = <?!= JSON.stringify(brandClCodes_) ?> || {};
+    var brandJobTitles = <?!= JSON.stringify(brandJobTitles_) ?> || {};
+    var webAppUrl = '<?= webAppUrl ?>' || window.location.href;
+
+    function updateDropdowns(){
+      var brand = document.getElementById('brand').value;
+      var clCodeSel = document.getElementById('clCode');
+      var jobTitleSel = document.getElementById('jobTitle');
+      
+      // Update CL Code dropdown
+      clCodeSel.innerHTML = '<option value="">-- Select CL Code --</option>';
+      if(brandClCodes[brand]){
+        for(var i=0;i<brandClCodes[brand].length;i++){
+          var opt = document.createElement('option');
+          opt.value = brandClCodes[brand][i];
+          opt.textContent = brandClCodes[brand][i];
+          clCodeSel.appendChild(opt);
+        }
+      }
+      
+      // Update Job Title dropdown
+      jobTitleSel.innerHTML = '<option value="">-- Select Position --</option>';
+      if(brandJobTitles[brand]){
+        for(var i=0;i<brandJobTitles[brand].length;i++){
+          var opt = document.createElement('option');
+          opt.value = brandJobTitles[brand][i];
+          opt.textContent = brandJobTitles[brand][i];
+          jobTitleSel.appendChild(opt);
+        }
+      }
+    }
+
+    function showUrlMismatchWarning() {
+      if (!webAppUrl) return;
+      try {
+        var current = new URL(window.location.href);
+        var canonical = new URL(webAppUrl);
+        var sameHost = current.host === canonical.host;
+        var samePath = current.pathname === canonical.pathname;
+        if (sameHost && samePath) return;
+
+        var status = document.getElementById('status');
+        var warn = document.createElement('div');
+        warn.style.marginTop = '8px';
+        warn.style.color = '#b45309';
+        warn.textContent = 'You are not on the canonical deployment URL. This can cause authorization loops.';
+
+        var link = document.createElement('a');
+        link.href = webAppUrl;
+        link.textContent = 'Open correct app URL';
+        link.style.display = 'inline-block';
+        link.style.marginTop = '6px';
+
+        status.appendChild(warn);
+        status.appendChild(link);
+      } catch (e) {
+        // ignore
+      }
+    }
+
+    // Initialize on load
+    window.addEventListener('load', function(){
+      updateDropdowns();
+      showUrlMismatchWarning();
+      // Self-test: verify POST works and returns JSON (not an OAuth HTML dialog)
+      try {
+        var params = new URLSearchParams();
+        params.append('action', 'debugecho');
+        params.append('ts', String(Date.now()));
+        fetch(window.location.href, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: params.toString()
+        })
+        .then(function(r){
+          return r.text().then(function(t){
+            try { return JSON.parse(t); }
+            catch (e) {
+              var low = (t || '').toLowerCase();
+              if (low.indexOf('<!doctype') !== -1 || low.indexOf('<iframe') !== -1 || low.indexOf('oauth-dialog') !== -1 || low.indexOf('authorization required') !== -1) {
+                showAuthPrompt('This deployment is returning an authorization HTML page for POST requests. This usually means the web app is deployed as “Execute as: User accessing the web app”. Redeploy with “Execute as: Me”, then retry.');
+              }
+              return null;
+            }
+          });
+        })
+        .catch(function(){ /* ignore */ });
+      } catch (e) {
+        // ignore
+      }
+    });
+
+    function buildAuthUrl() {
+      try {
+        var u = new URL(webAppUrl);
+        u.searchParams.set('page', 'auth');
+        return u.toString();
+      } catch (e) {
+        return webAppUrl + (webAppUrl.indexOf('?') === -1 ? '?' : '&') + 'page=auth';
+      }
+    }
+
+    function showAuthPrompt(message) {
+      var status = document.getElementById('status');
+      status.innerHTML = '';
+      var msg = document.createElement('div');
+      msg.textContent = message;
+      var link = document.createElement('a');
+      link.href = buildAuthUrl();
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      link.textContent = 'Open authorization page';
+      link.style.display = 'inline-block';
+      link.style.marginTop = '6px';
+      status.appendChild(msg);
+      status.appendChild(link);
+    }
+
+    document.getElementById('bookBtn').addEventListener('click', function(){
+      var brand = document.getElementById('brand').value;
+      var email = document.getElementById('email').value.trim();
+      var clCode = document.getElementById('clCode').value;
+      var jobTitle = document.getElementById('jobTitle').value;
+      var status = document.getElementById('status');
+      
+      if(!brand||!email||!clCode||!jobTitle){ 
+        status.textContent = 'Please fill all fields.'; 
+        return; 
+      }
+      
+      // Combine as "Job Title - CL Code" for Text For Email
+      var textForEmail = jobTitle + ' - ' + clCode;
+      status.textContent = 'Generating secure link...';
+
+      var params = new URLSearchParams();
+      params.append('action','generatesignedurl');
+      params.append('brand',brand);
+      params.append('email',email);
+      params.append('textForEmail',textForEmail);
+
+      fetch(window.location.href, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: params.toString()
+      })
+      .then(function(r){ return r.text().then(function(t){ try { return JSON.parse(t); } catch(e){ console.error('Non-JSON response', t);
+            // If server returned an HTML page (authorization dialog) don't display raw HTML to user
+            var low = (t || '').toLowerCase();
+            if (low.indexOf('<!doctype') !== -1 || low.indexOf('<iframe') !== -1 || low.indexOf('oauth-dialog') !== -1 || low.indexOf('authorization required') !== -1) {
+              return { ok: false, error: 'Authorization required', authRequired: true };
+            }
+            return { ok:false, error: t };
+          } }); })
+      .then(function(json){
+        console.log('generateSignedUrl response', json);
+        if(json.ok && json.url){
+          window.location.href = json.url;
+        } else {
+          if (json && json.authRequired) {
+            showAuthPrompt('Server requires authorization. Please authorize the app and retry.');
+          } else {
+            status.textContent = json.error || 'Failed to generate link';
+          }
+        }
+      }).catch(function(e){ console.error(e); status.textContent = 'Request failed'; });
+    });
+  </script>
+</body>
+</html>
