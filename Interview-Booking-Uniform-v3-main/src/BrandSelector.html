@@ -28,7 +28,7 @@
       </div>
 
       <div style="margin-top:12px;">
-        <label for="textForEmail">Text For Email / Position</label>
+        <label for="textForEmail">Position Applied</label>
         <select id="textForEmail" class="form-control" disabled>
           <option value="">Loading…</option>
         </select>
@@ -62,7 +62,7 @@
           sel.disabled  = false;
           var placeholder = document.createElement('option');
           placeholder.value = '';
-          placeholder.text  = (options && options.length) ? '-- Select position --' : '-- No positions found --';
+          placeholder.text  = (options && options.length) ? '-- Select your position --' : '-- No positions found --';
           sel.appendChild(placeholder);
           if (options && options.length) {
             options.forEach(function(val) {
@@ -90,7 +90,7 @@
       showMsg('', '');
 
       if (!brand) { showMsg('danger', 'Please select a brand.'); return; }
-      if (!textForEmail) { showMsg('danger', 'Please select a position (Text For Email).'); return; }
+      if (!textForEmail) { showMsg('danger', 'Please select your position.'); return; }
       if (!email) { showMsg('danger', 'Please enter your email address.'); return; }
 
       btn.disabled    = true;
