@@ -22,7 +22,7 @@ function sendInviteEmail_(params) {
     var brandInfo = getBrand_(params.brand);
     var brandName = brandInfo ? brandInfo.name : params.brand;
     var webAppUrl = getWebAppUrl_();
-    var bookingLink = webAppUrl + '?brand=' + params.brand + '&token=' + params.token;
+    var bookingLink = webAppUrl + '?page=access&token=' + encodeURIComponent(params.token || '');
     
     var subject = params.isReissue
       ? '(Re-sent) Your Interview Booking Link – ' + brandName

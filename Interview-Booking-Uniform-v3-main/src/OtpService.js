@@ -488,6 +488,16 @@ function sendBookingConfirmEmail_(params) {
   var traceId = params.traceId || generateTraceId_();
   var webAppUrl = getWebAppUrl_();
 
+  // If caller passes accessUrl only, extract token so we can rebuild canonical gate URL.
+  if (!token && accessUrl) {
+    try {
+      var tokenMatch = accessUrl.match(/[?&]token=([^&]+)/i);
+      if (tokenMatch && tokenMatch[1]) {
+        token = decodeURIComponent(tokenMatch[1]);
+      }
+    } catch (e) {}
+  }
+
   if (!accessUrl && !token && bookingUrl) {
     var issued = issueVerifiedAccessTokenForBooking_({
       email: email,
@@ -503,7 +513,8 @@ function sendBookingConfirmEmail_(params) {
     token = issued.token;
   }
 
-  if (!accessUrl && token) {
+  // Canonicalize CTA URL: always use web app gate URL derived from token.
+  if (token) {
     accessUrl = webAppUrl + '?page=access&token=' + encodeURIComponent(token);
   }
   
@@ -537,6 +548,7 @@ function sendBookingConfirmEmail_(params) {
   
   htmlBody.brandName = brandName;
   htmlBody.textForEmail = textForEmail;
+  htmlBody.gateUrl = accessUrl;
   htmlBody.accessUrl = accessUrl;
   
   var maskedEmail = email.substring(0, 3) + '***@' + email.split('@')[1];
