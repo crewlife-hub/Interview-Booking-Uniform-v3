@@ -66,19 +66,34 @@ function searchCandidateInSmartsheet_(brand, email, textForEmail) {
     var columns = data.columns || [];
     var rows    = data.rows    || [];
 
-    // Locate columns by case-insensitive trimmed title
+    // Locate columns by case-insensitive trimmed title (flexible Interview Link match)
     var emailColId         = null;
     var tfeColId           = null;
     var interviewLinkColId = null;
     var columnMap          = {};
 
     for (var i = 0; i < columns.length; i++) {
-      var col       = columns[i];
+      var col = columns[i];
       var normTitle = String(col.title || '').trim().toLowerCase();
       columnMap[col.id] = col.title;
-      if (normTitle === 'email')           emailColId         = col.id;
-      if (normTitle === 'text for email')  tfeColId           = col.id;
-      if (normTitle === 'interview link')  interviewLinkColId = col.id;
+
+      if (normTitle === 'email') emailColId = col.id;
+      if (normTitle === 'text for email') tfeColId = col.id;
+
+      // Interview link can be "Interview: Link", "Interview : Link", etc.
+      if (normTitle === 'interview link') interviewLinkColId = col.id;
+    }
+
+    // Flexible fallback: if exact "interview link" not found, match any title containing both words
+    if (!interviewLinkColId) {
+      for (var j = 0; j < columns.length; j++) {
+        var col2 = columns[j];
+        var t2 = String(col2.title || '').trim().toLowerCase();
+        if (t2.indexOf('interview') !== -1 && t2.indexOf('link') !== -1) {
+          interviewLinkColId = col2.id;
+          break;
+        }
+      }
     }
 
     if (!emailColId || !tfeColId) {

@@ -48,9 +48,14 @@ function doGet(e) {
       return serveOtpVerifyPage_(params, traceId);
     }
 
-    // Route: Booking confirmation page (scanner-safe)
+    // Route: Secure booking access (confirm gate + one-time redirect)
+    if (page === 'access') {
+      return serveSecureAccess_(params, traceId);
+    }
+
+    // Route: Booking confirmation page (legacy — neutered, use secure access flow)
     if (page === 'booking') {
-      return serveBookingConfirmPage_(params, traceId);
+      return serveErrorPage_('Deprecated', 'This page is no longer available. Please use the secure access link from your email.', traceId);
     }
 
     // Route: Token verification (legacy candidate flow)
@@ -104,17 +109,14 @@ function doPost(e) {
       return handleGenerateSignedUrl_(params, traceId);
     }
 
-    // Route: Booking redirect (scanner-safe POST)
+    // Route: Secure booking access confirmation (POST from confirm gate)
+    if (page === 'access') {
+      return handleSecureAccessConfirm_(params, traceId);
+    }
+
+    // Route: Booking redirect — DISABLED (use secure access flow)
     if (action === 'redirect') {
-      var bookingUrl = params.url;
-      if (bookingUrl) {
-        logEvent_(traceId, params.brand || '', params.email || '', 'BOOKING_REDIRECT', { url: maskUrl_(bookingUrl) });
-        return HtmlService.createHtmlOutput(
-          '<html><head><meta http-equiv="refresh" content="0;url=' + bookingUrl + '"></head>' +
-          '<body>Redirecting to booking page...</body></html>'
-        );
-      }
-      return serveErrorPage_('Invalid Request', 'Missing booking URL', traceId);
+      return serveErrorPage_('Deprecated', 'Direct redirects are no longer available. Please use the secure access link.', traceId);
     }
 
     // Route: Token confirmation (candidate confirms booking)
@@ -246,6 +248,88 @@ function serveDiagPage_(brand, traceId) {
   
   return HtmlService.createHtmlOutput(html)
     .setTitle('Diagnostics')
+    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+}
+
+/**
+ * Serve the confirm gate page for secure booking access (GET).
+ * Shows a "Continue" button inside a POST form — scanners cannot submit it.
+ * Does NOT consume the token.
+ * @param {Object} params - URL parameters
+ * @param {string} traceId - Trace ID
+ * @returns {HtmlOutput}
+ */
+function serveSecureAccess_(params, traceId) {
+  var token = String(params.token || '').trim();
+  if (!token) {
+    return serveErrorPage_('Invalid Link', 'Missing access token. Please use the link from your email.', traceId);
+  }
+
+  // Read-only check — do NOT modify the token
+  var peek = peekToken_(token);
+  if (!peek.ok) {
+    logEvent_(traceId, '', '', 'ACCESS_GATE_REJECTED', { code: peek.code, token: token.substring(0, 8) + '...' });
+    var icon = peek.code === 'ALREADY_USED' ? '🔒' : (peek.code === 'EXPIRED' ? '⏰' : '❌');
+    var title = peek.code === 'ALREADY_USED' ? 'Link Already Used' :
+                peek.code === 'EXPIRED' ? 'Link Expired' : 'Invalid Link';
+    return serveErrorPage_(title, peek.error, traceId, icon);
+  }
+
+  // Show confirm gate
+  var brandInfo = getBrand_(peek.brand);
+  var template = HtmlService.createTemplateFromFile('ConfirmGate');
+  template.token = token;
+  template.brand = peek.brand;
+  template.brandName = brandInfo ? brandInfo.name : peek.brand;
+  template.textForEmail = peek.textForEmail;
+  template.webAppUrl = getWebAppUrl_();
+  template.version = APP_VERSION;
+
+  logEvent_(traceId, peek.brand, '', 'ACCESS_GATE_SHOWN', { token: token.substring(0, 8) + '...' });
+
+  return template.evaluate()
+    .setTitle('Confirm Booking Access')
+    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+}
+
+/**
+ * Handle the confirm gate POST — consume token and redirect (one-time).
+ * @param {Object} params - Form parameters (page, token, confirm)
+ * @param {string} traceId - Trace ID
+ * @returns {HtmlOutput}
+ */
+function handleSecureAccessConfirm_(params, traceId) {
+  var token = String(params.token || '').trim();
+  if (!token || params.confirm !== '1') {
+    return serveErrorPage_('Invalid Request', 'Missing confirmation. Please use the button on the confirmation page.', traceId);
+  }
+
+  // Consume token atomically — marks USED before returning booking URL
+  var result = consumeTokenForRedirect_(token, traceId);
+  if (!result.ok) {
+    var icon = result.code === 'ALREADY_USED' ? '🔒' :
+               result.code === 'EXPIRED' ? '⏰' :
+               result.code === 'BAD_BOOKING_URL' ? '⚠️' : '❌';
+    var title = result.code === 'ALREADY_USED' ? 'Link Already Used' :
+                result.code === 'EXPIRED' ? 'Link Expired' :
+                result.code === 'BAD_BOOKING_URL' ? 'Configuration Error' : 'Access Denied';
+    return serveErrorPage_(title, result.error, traceId, icon);
+  }
+
+  // Serve the secure redirect page (booking URL only in JS, never visible)
+  var template = HtmlService.createTemplateFromFile('SecureRedirect');
+  template.bookingUrl = result.bookingUrl;
+  template.brand = result.brand;
+  template.textForEmail = result.textForEmail;
+  template.version = APP_VERSION;
+
+  logEvent_(traceId, result.brand, '', 'SECURE_REDIRECT', {
+    token: token.substring(0, 8) + '...',
+    url: maskUrl_(result.bookingUrl)
+  });
+
+  return template.evaluate()
+    .setTitle('Redirecting…')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
 

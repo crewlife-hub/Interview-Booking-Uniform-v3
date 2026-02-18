@@ -369,7 +369,7 @@ function handleOtpVerify_(params, traceId) {
     return { ok: false, error: result.error, diag: diag };
   }
   
-  // Prefer Position Link stored on the OTP token row; fallback to CL resolution
+  // Build secure access URL — never expose the actual booking URL to the client
   var bookingUrl = (result.clResolution && result.clResolution.bookingUrl)
     ? result.clResolution.bookingUrl
     : null;
@@ -380,20 +380,22 @@ function handleOtpVerify_(params, traceId) {
     return { ok: true, verified: true, error: 'Could not resolve booking URL. Please contact your recruiter.', textForEmail: result.textForEmail, diag: diag };
   }
 
-  logStep('REDIRECT_SUCCESS', { bookingUrl: maskUrl_(bookingUrl) });
-  logEvent_(traceId, brand, email, 'REDIRECT_SUCCESS', {
-    token:      token ? token.substring(0,8)+'...' : '',
-    bookingUrl: maskUrl_(bookingUrl)
+  // The access URL points to the confirm gate — the actual calendar URL is never sent to the client
+  var accessUrl = getWebAppUrl_() + '?page=access&token=' + encodeURIComponent(token);
+
+  logStep('ACCESS_URL_GENERATED', { accessUrl: maskUrl_(accessUrl) });
+  logEvent_(traceId, brand, email, 'ACCESS_URL_GENERATED', {
+    token: token ? token.substring(0,8)+'...' : ''
   });
 
-  // Send booking confirmation email
+  // Send booking confirmation email with secure access link (NOT the booking URL)
   var emailResult;
   try {
     emailResult = sendBookingConfirmEmail_({
       email:        email,
       brand:        brand,
       textForEmail: result.textForEmail || textForEmail,
-      bookingUrl:   bookingUrl,
+      accessUrl:    accessUrl,
       traceId:      traceId
     });
     logStep('SEND_BOOKING_EMAIL_RESULT', { ok: emailResult.ok, error: emailResult.error || null });
@@ -409,7 +411,7 @@ function handleOtpVerify_(params, traceId) {
     verified:     true,
     emailSent:    emailResult.ok,
     emailError:   emailResult.error || null,
-    bookingUrl:   bookingUrl,
+    accessUrl:    accessUrl,
     textForEmail: result.textForEmail,
     diag:         diag
   };

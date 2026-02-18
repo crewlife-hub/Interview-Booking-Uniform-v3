@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <meta name="robots" content="noindex,nofollow">
+  <title>Confirm Booking Access – <?= brandName ?></title>
+  <?!= include_('Styles'); ?>
+  <style>
+    .gate-container {
+      max-width: 480px;
+      margin: 40px auto;
+      text-align: center;
+    }
+    .gate-icon {
+      font-size: 64px;
+      margin-bottom: 16px;
+    }
+    .gate-info {
+      background: #e3f2fd;
+      border-radius: 8px;
+      padding: 20px;
+      margin: 20px 0;
+      text-align: left;
+    }
+    .gate-info p {
+      margin: 8px 0;
+    }
+    .warning-box {
+      background: #fff3cd;
+      border: 1px solid #ffc107;
+      border-radius: 8px;
+      padding: 15px;
+      margin: 20px 0;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>🚢 CrewLife Bookings</h1>
+  </div>
+
+  <div class="container">
+    <div class="card gate-container">
+      <div class="gate-icon">🔐</div>
+      <h2>Ready to Book Your Interview?</h2>
+      <p style="color:#666;">Click <strong>Continue</strong> below to open the scheduling page.</p>
+
+      <div class="gate-info">
+        <p><strong>Brand:</strong> <?= brandName ?></p>
+        <p><strong>Position:</strong> <?= textForEmail ?></p>
+      </div>
+
+      <div class="warning-box">
+        <p style="margin:0;">
+          ⚠️ <strong>Important:</strong> This link can only be used <strong>once</strong>.
+          After clicking Continue, it cannot be reopened or shared.
+        </p>
+      </div>
+
+      <!-- POST form prevents Gmail / link-scanner prefetch from consuming the token -->
+      <form method="POST" action="<?= webAppUrl ?>" style="margin: 30px 0;">
+        <input type="hidden" name="page" value="access">
+        <input type="hidden" name="token" value="<?= token ?>">
+        <input type="hidden" name="confirm" value="1">
+        <button type="submit" class="btn btn-success" style="padding: 15px 40px; font-size: 18px; width: 100%;">
+          ✅ Continue to Schedule Interview
+        </button>
+      </form>
+
+      <p style="color:#999; font-size:12px;">
+        If you're not ready, you can return later using the same link — as long as it hasn't been used yet.
+      </p>
+    </div>
+  </div>
+
+  <div class="version-tag">v<?= version ?></div>
+</body>
+</html>

@@ -263,11 +263,8 @@ function validateOtp_(params) {
   
   // Validate OTP value
   if (rowOtp === otp) {
-    // SUCCESS - mark as VERIFIED
+    // SUCCESS - mark as VERIFIED (Used At will be set when secure access link is consumed)
     sheet.getRange(sheetRow, idx['Status'] + 1).setValue('VERIFIED');
-    if (idx['Used At'] !== undefined) {
-      sheet.getRange(sheetRow, idx['Used At'] + 1).setValue(new Date());
-    }
     
     logEvent_(traceId, rowBrand, rowEmail, 'OTP_VERIFIED', { textForEmail: rowTextForEmail });
     
@@ -426,7 +423,7 @@ function sendBookingConfirmEmail_(params) {
   var email = String(params.email || '').toLowerCase().trim();
   var brand = String(params.brand || '').toUpperCase();
   var textForEmail = String(params.textForEmail || '').trim();
-  var bookingUrl = String(params.bookingUrl || '').trim();
+  var accessUrl = String(params.accessUrl || params.bookingUrl || '').trim();
   var traceId = params.traceId || generateTraceId_();
   
   // Input validation
@@ -434,9 +431,9 @@ function sendBookingConfirmEmail_(params) {
     Logger.log('[sendBookingConfirmEmail_] Invalid email');
     return { ok: false, error: 'Invalid email address' };
   }
-  if (!bookingUrl) {
-    Logger.log('[sendBookingConfirmEmail_] Missing bookingUrl');
-    return { ok: false, error: 'Missing booking URL - cannot send email without link' };
+  if (!accessUrl) {
+    Logger.log('[sendBookingConfirmEmail_] Missing access URL');
+    return { ok: false, error: 'Missing access URL - cannot send email without link' };
   }
   
   var brandInfo = getBrand_(brand);
@@ -455,10 +452,10 @@ function sendBookingConfirmEmail_(params) {
   
   htmlBody.brandName = brandName;
   htmlBody.textForEmail = textForEmail;
-  htmlBody.bookingUrl = bookingUrl;
+  htmlBody.accessUrl = accessUrl;
   
   var maskedEmail = email.substring(0, 3) + '***@' + email.split('@')[1];
-  Logger.log('[sendBookingConfirmEmail_] Sending to %s (masked: %s), bookingUrl=%s', email, maskedEmail, bookingUrl.substring(0, 60));
+  Logger.log('[sendBookingConfirmEmail_] Sending to %s (masked: %s), accessUrl=%s', email, maskedEmail, maskUrl_(accessUrl));
   
   try {
     MailApp.sendEmail({
@@ -468,7 +465,7 @@ function sendBookingConfirmEmail_(params) {
       name: 'Crew Life at Sea'
     });
     
-    logEvent_(traceId, brand, maskedEmail, 'BOOKING_EMAIL_SENT', { bookingUrl: bookingUrl.substring(0, 80) });
+    logEvent_(traceId, brand, maskedEmail, 'BOOKING_EMAIL_SENT', { accessUrl: maskUrl_(accessUrl) });
     Logger.log('[sendBookingConfirmEmail_] SUCCESS - email sent to %s', maskedEmail);
     return { ok: true };
   } catch (e) {
