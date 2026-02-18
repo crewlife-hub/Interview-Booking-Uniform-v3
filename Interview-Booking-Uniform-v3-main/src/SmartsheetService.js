@@ -135,7 +135,7 @@ function searchCandidateInSmartsheet_(brand, email, textForEmail) {
 
   // No exact match across all sheets
   if (atLeastOneReadable) {
-    logEvent_(traceId, brand, email, 'MATCH_FAIL', { brand: brand });
+    logEvent_(traceId, brand, email, 'MATCH_FAIL', { brand: brand, sheetIds: sheetIds, sheetIdsCount: sheetIds.length });
     return { ok: true, found: false, exactMatch: false };
   }
 
@@ -155,9 +155,12 @@ function getSmartsheetIdsForBrand_(brand) {
   var bKey = String(brand).toUpperCase().trim();
   var props = PropertiesService.getScriptProperties();
 
-  // Script property overrides: SMARTSHEET_ID_{BRAND}
-  var prop = props.getProperty('SMARTSHEET_ID_' + bKey);
-  if (prop) ids = ids.concat(String(prop).split(',').map(function(s) { return s.trim(); }).filter(function(s) { return s; }));
+  // Script property overrides: SMARTSHEET_IDS_{BRAND} (comma list) and SMARTSHEET_ID_{BRAND} (single/comma)
+  var propList = props.getProperty('SMARTSHEET_IDS_' + bKey);
+  if (propList) ids = ids.concat(String(propList).split(',').map(function(s) { return s.trim(); }).filter(function(s) { return s; }));
+
+  var propSingle = props.getProperty('SMARTSHEET_ID_' + bKey);
+  if (propSingle) ids = ids.concat(String(propSingle).split(',').map(function(s) { return s.trim(); }).filter(function(s) { return s; }));
 
   // Brand registry entry
   var b = getBrand_(brand);
@@ -258,10 +261,41 @@ function getTextForEmailOptionsForBrandApi(brand) {
   }
 
   options.sort(function(a, b) { return a.toLowerCase().localeCompare(b.toLowerCase()); });
-  logEvent_(traceId, brand, '', 'OPTIONS_LOADED', { brand: brand, count: options.length });
+  logEvent_(traceId, brand, '', 'OPTIONS_LOADED', { brand: brand, sheetIdsCount: sheetIds.length, count: options.length });
 
   try { cache.put(cacheKey, JSON.stringify(options), 600); } catch (e) { /* ignore */ }
   return options;
+}
+
+/**
+ * Quick diagnostics helper for brand option loading.
+ * Prints loaded sheet IDs count and Text For Email options count for ROYAL/COSTA/SEACHEFS.
+ * Run from Apps Script editor: TEST_BrandOptionsCounts()
+ * @returns {Object}
+ */
+function TEST_BrandOptionsCounts() {
+  var brands = ['ROYAL', 'COSTA', 'SEACHEFS'];
+  var out = {};
+
+  for (var i = 0; i < brands.length; i++) {
+    var brand = brands[i];
+    var sheetIds = getSmartsheetIdsForBrand_(brand);
+    var options = getTextForEmailOptionsForBrandApi(brand);
+
+    out[brand] = {
+      sheetIdsCount: sheetIds.length,
+      sheetIds: sheetIds,
+      optionsCount: options.length
+    };
+
+    Logger.log('%s => sheetIdsCount=%s optionsCount=%s sheetIds=%s',
+      brand,
+      sheetIds.length,
+      options.length,
+      JSON.stringify(sheetIds));
+  }
+
+  return out;
 }
 
 /**
