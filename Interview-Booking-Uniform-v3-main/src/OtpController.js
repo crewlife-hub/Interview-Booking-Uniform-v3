@@ -438,9 +438,9 @@ function serveBookingConfirmPage_(params, traceId) {
   var brand = String(params.brand || '').toUpperCase();
   var email = String(params.e || '').toLowerCase().trim();
   var textForEmail = String(params.t || '').trim();
-  var bookingUrl = params.url || '';
+  var token = String(params.token || '').trim();
   
-  if (!brand || !bookingUrl) {
+  if (!brand || !token) {
     return serveErrorPage_('Invalid Request', 'Missing booking information', traceId);
   }
   
@@ -451,9 +451,10 @@ function serveBookingConfirmPage_(params, traceId) {
   template.brand = brand;
   template.brandName = brandInfo ? brandInfo.name : brand;
   template.webAppUrl = getWebAppUrl_();
+  template.accessUrl = getWebAppUrl_() + '?page=access&token=' + encodeURIComponent(token);
   template.email = email;
   template.textForEmail = textForEmail;
-  template.bookingUrl = bookingUrl;
+  template.token = token;
   template.recruiterName = clResolution.ok ? clResolution.recruiterName : '';
   template.clCode = clResolution.ok ? clResolution.clCode : '';
   template.version = APP_VERSION;

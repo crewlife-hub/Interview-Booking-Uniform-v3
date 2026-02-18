@@ -8,6 +8,7 @@ var APP_VERSION = '1.0.0';
 var CONFIG_SHEET_ID = '1qM3ZEdBsvbEofDH8DayRWcRa4bUcrKQIv8kzKSYZ1AM';
 // Default exec URL — replaceable via Script Properties `WEB_APP_EXEC_URL` or `DEPLOY_ID`
 var WEB_APP_EXEC_URL_DEFAULT = 'https://script.google.com/macros/s/AKfycbzL1GZHA4DoMNhDT5-6LuYlXw2YPyYZI444dJFOHvrUtPXZorO4P7Sx1i8-Qe1bKKmxPQ/exec';
+var WEB_APP_EXEC_URL_TARGET = 'https://script.google.com/a/macros/seainfogroup.com/s/AKfycbwglbdo_kqxQGcucUPKvWNhvw8UmZOJBFLdf8Gj3UWVLHjPjlHZniH3H7mJ25JRK0ziFg/exec';
 
 /**
  * Get all configuration values
@@ -105,6 +106,18 @@ function setHmacSecret_(secret) {
 function setWebAppExecUrl_(url) {
   var props = PropertiesService.getScriptProperties();
   props.setProperty('WEB_APP_EXEC_URL', String(url || '').trim());
+}
+
+/**
+ * One-time admin setup to pin the active web app exec URL in Script Properties.
+ * Run manually from Apps Script editor: SET_WEBAPP_EXEC_URL()
+ * @returns {string} The configured URL
+ */
+function SET_WEBAPP_EXEC_URL() {
+  var props = PropertiesService.getScriptProperties();
+  props.setProperty('WEB_APP_EXEC_URL', WEB_APP_EXEC_URL_TARGET);
+  Logger.log('WEB_APP_EXEC_URL set to: ' + WEB_APP_EXEC_URL_TARGET);
+  return WEB_APP_EXEC_URL_TARGET;
 }
 
 /**
