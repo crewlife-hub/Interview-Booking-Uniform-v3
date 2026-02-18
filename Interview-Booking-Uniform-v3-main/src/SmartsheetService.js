@@ -6,6 +6,39 @@
 
 var SMARTSHEET_API_BASE = 'https://api.smartsheet.com/2.0';
 
+function isSeaChefsBrand_(brand) {
+  return String(brand || '').toUpperCase().trim() === 'SEACHEFS';
+}
+
+function normalizeEmailForBrandMatch_(value, brand) {
+  var out = String(value || '').toLowerCase().trim();
+  if (!isSeaChefsBrand_(brand)) return out;
+  return out.replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function normalizeTextForEmailForBrandMatch_(value, brand) {
+  var out = String(value || '');
+  if (isSeaChefsBrand_(brand)) {
+    out = out
+      .replace(/\u00a0/g, ' ')
+      .replace(/[\u2013\u2014\u2212]/g, '-')
+      .replace(/\s+/g, ' ');
+  } else {
+    out = out.replace(/\s+/g, ' ');
+  }
+  return out.trim().toLowerCase();
+}
+
+function getFirstCharCodes_(value, maxChars) {
+  var str = String(value || '');
+  var limit = Math.max(0, Number(maxChars) || 30);
+  var out = [];
+  for (var i = 0; i < str.length && i < limit; i++) {
+    out.push(str.charCodeAt(i));
+  }
+  return out;
+}
+
 /**
  * Search for a candidate in Smartsheet by Email + Text For Email.
  * ANY-sheet match wins: returns on the first exact match found.
@@ -19,6 +52,7 @@ function searchCandidateInSmartsheet_(brand, email, textForEmail) {
   var cfg      = getConfig_();
   var apiToken = cfg.SMARTSHEET_API_TOKEN;
   var traceId  = generateTraceId_();
+  var seaChefs = isSeaChefsBrand_(brand);
 
   if (!apiToken) {
     return { ok: false, error: 'Smartsheet API token not configured', code: 'NO_API_TOKEN' };
@@ -30,14 +64,41 @@ function searchCandidateInSmartsheet_(brand, email, textForEmail) {
   }
 
   // Normalise inputs once
-  var normEmail = String(email        || '').toLowerCase().trim();
-  var normTfe   = String(textForEmail || '').trim().replace(/\s+/g, ' ').toLowerCase();
+  var normEmail = normalizeEmailForBrandMatch_(email, brand);
+  var normTfe   = normalizeTextForEmailForBrandMatch_(textForEmail, brand);
+
+  var seaChefsDebug = {
+    brand: String(brand || '').toUpperCase().trim(),
+    inputEmailRaw: String(email || ''),
+    inputTfeRaw: String(textForEmail || ''),
+    inputEmailNormalized: normEmail,
+    inputTfeNormalized: normTfe,
+    sheetIds: sheetIds,
+    emailMatches: 0,
+    textMismatchesAfterEmailMatch: 0,
+    searchedSheets: []
+  };
+
+  if (seaChefs) {
+    Logger.log('SEACHEFS_DEBUG start: sheetIds=%s normEmail=%s normTfe=%s',
+      JSON.stringify(sheetIds), normEmail, normTfe);
+    logEvent_(traceId, brand, email, 'SEACHEFS_DEBUG_INPUT', {
+      sheetIds: sheetIds,
+      normEmail: normEmail,
+      normTfe: normTfe
+    });
+  }
 
   var atLeastOneReadable = false;
 
   for (var s = 0; s < sheetIds.length; s++) {
     var sheetId = sheetIds[s];
     var response, httpCode;
+
+    if (seaChefs) {
+      Logger.log('SEACHEFS_DEBUG searching sheetId=%s', sheetId);
+      logEvent_(traceId, brand, email, 'SEACHEFS_DEBUG_SHEET_SEARCH', { sheetId: sheetId });
+    }
 
     try {
       response = UrlFetchApp.fetch(
@@ -65,6 +126,10 @@ function searchCandidateInSmartsheet_(brand, email, textForEmail) {
     var data    = JSON.parse(response.getContentText());
     var columns = data.columns || [];
     var rows    = data.rows    || [];
+
+    if (seaChefs) {
+      seaChefsDebug.searchedSheets.push({ sheetId: sheetId, sheetName: String(data.name || ''), rows: rows.length });
+    }
 
     // Locate columns by case-insensitive trimmed title (flexible Interview Link match)
     var emailColId         = null;
@@ -107,6 +172,7 @@ function searchCandidateInSmartsheet_(brand, email, textForEmail) {
       var cells = row.cells || [];
       var rowEmail         = '';
       var rowTfe           = '';
+      var rowTfeRaw        = '';
       var rowInterviewLink = '';
       var rowData          = { rowId: row.id };
 
@@ -114,13 +180,42 @@ function searchCandidateInSmartsheet_(brand, email, textForEmail) {
         var cell    = cells[c];
         var cellVal = String(cell.displayValue || cell.value || '');
         rowData[columnMap[cell.columnId]] = cellVal;
-        if (cell.columnId === emailColId)                               rowEmail         = cellVal.toLowerCase().trim();
-        if (cell.columnId === tfeColId)                                 rowTfe           = cellVal.trim().replace(/\s+/g, ' ').toLowerCase();
+        if (cell.columnId === emailColId)                               rowEmail         = normalizeEmailForBrandMatch_(cellVal, brand);
+        if (cell.columnId === tfeColId) {
+          rowTfeRaw = cellVal;
+          rowTfe = normalizeTextForEmailForBrandMatch_(cellVal, brand);
+        }
         if (interviewLinkColId && cell.columnId === interviewLinkColId) rowInterviewLink = cellVal.trim();
+      }
+
+      if (seaChefs && rowEmail === normEmail) {
+        seaChefsDebug.emailMatches++;
+        if (rowTfe !== normTfe) {
+          seaChefsDebug.textMismatchesAfterEmailMatch++;
+          var charCodes = getFirstCharCodes_(rowTfeRaw, 30);
+          Logger.log('SEACHEFS_DEBUG email matched but text mismatch: sheetId=%s rowId=%s rawTfe=%s normRowTfe=%s normInputTfe=%s charCodes=%s',
+            sheetId,
+            row.id,
+            rowTfeRaw,
+            rowTfe,
+            normTfe,
+            JSON.stringify(charCodes));
+          logEvent_(traceId, brand, email, 'SEACHEFS_DEBUG_TFE_MISMATCH', {
+            sheetId: sheetId,
+            rowId: row.id,
+            rowTfeRaw: rowTfeRaw,
+            rowTfeNormalized: rowTfe,
+            inputTfeNormalized: normTfe,
+            rowTfeCharCodesFirst30: charCodes
+          });
+        }
       }
 
       if (rowEmail === normEmail && rowTfe === normTfe) {
         logEvent_(traceId, brand, email, 'MATCH_FOUND', { matchedSheetId: sheetId });
+        if (seaChefs) {
+          Logger.log('SEACHEFS_DEBUG MATCH_FOUND sheetId=%s rowId=%s', sheetId, row.id);
+        }
         return {
           ok:             true,
           found:          true,
@@ -135,7 +230,15 @@ function searchCandidateInSmartsheet_(brand, email, textForEmail) {
 
   // No exact match across all sheets
   if (atLeastOneReadable) {
-    logEvent_(traceId, brand, email, 'MATCH_FAIL', { brand: brand, sheetIds: sheetIds, sheetIdsCount: sheetIds.length });
+    var failMeta = { brand: brand, sheetIds: sheetIds, sheetIdsCount: sheetIds.length };
+    if (seaChefs) {
+      failMeta.seaChefsDebug = seaChefsDebug;
+      Logger.log('SEACHEFS_DEBUG MATCH_FAIL details=%s', JSON.stringify(seaChefsDebug));
+    }
+    logEvent_(traceId, brand, email, 'MATCH_FAIL', failMeta);
+    if (seaChefs) {
+      return { ok: true, found: false, exactMatch: false, debug: seaChefsDebug };
+    }
     return { ok: true, found: false, exactMatch: false };
   }
 
@@ -153,18 +256,24 @@ function getSmartsheetIdsForBrand_(brand) {
   var ids = [];
   if (!brand) return ids;
   var bKey = String(brand).toUpperCase().trim();
+  var isSeaChefs = bKey === 'SEACHEFS';
   var props = PropertiesService.getScriptProperties();
 
   // Script property overrides: SMARTSHEET_IDS_{BRAND} (comma list) and SMARTSHEET_ID_{BRAND} (single/comma)
   var propList = props.getProperty('SMARTSHEET_IDS_' + bKey);
-  if (propList) ids = ids.concat(String(propList).split(',').map(function(s) { return s.trim(); }).filter(function(s) { return s; }));
+  var propListIds = [];
+  if (propList) propListIds = propListIds.concat(String(propList).split(',').map(function(s) { return s.trim(); }).filter(function(s) { return s; }));
 
   var propSingle = props.getProperty('SMARTSHEET_ID_' + bKey);
-  if (propSingle) ids = ids.concat(String(propSingle).split(',').map(function(s) { return s.trim(); }).filter(function(s) { return s; }));
+  if (propSingle) propListIds = propListIds.concat(String(propSingle).split(',').map(function(s) { return s.trim(); }).filter(function(s) { return s; }));
+  if (propListIds.length > 0) ids = ids.concat(propListIds);
 
-  // Brand registry entry
-  var b = getBrand_(brand);
-  if (b && b.smartsheetId) ids = ids.concat(String(b.smartsheetId).split(',').map(function(s) { return s.trim(); }).filter(function(s) { return s; }));
+  // Brand registry entry (SeaChefs: only use fallback when no explicit script-property IDs are configured)
+  var shouldUseBrandFallback = !(isSeaChefs && propListIds.length > 0);
+  if (shouldUseBrandFallback) {
+    var b = getBrand_(brand);
+    if (b && b.smartsheetId) ids = ids.concat(String(b.smartsheetId).split(',').map(function(s) { return s.trim(); }).filter(function(s) { return s; }));
+  }
 
   // BRAND_CONFIG overrides
   try {
@@ -261,7 +370,7 @@ function getTextForEmailOptionsForBrandApi(brand) {
   }
 
   options.sort(function(a, b) { return a.toLowerCase().localeCompare(b.toLowerCase()); });
-  logEvent_(traceId, brand, '', 'OPTIONS_LOADED', { brand: brand, sheetIdsCount: sheetIds.length, count: options.length });
+  logEvent_(traceId, brand, '', 'OPTIONS_LOADED', { brand: brand, sheetIds: sheetIds, sheetIdsCount: sheetIds.length, count: options.length });
 
   try { cache.put(cacheKey, JSON.stringify(options), 600); } catch (e) { /* ignore */ }
   return options;
@@ -330,6 +439,113 @@ function TEST_BrandOptionsCounts() {
       JSON.stringify(first10));
   }
 
+  return out;
+}
+
+/**
+ * Focused diagnostics for SeaChefs matching issue.
+ * Calls the main search function with known failing sample input.
+ * Run from Apps Script editor: TEST_DebugSeachefsMatch()
+ * @returns {Object}
+ */
+function TEST_DebugSeachefsMatch() {
+  var brand = 'SEACHEFS';
+  var email = 'crewlife@seainfogroup.com';
+  var textForEmail = 'Assistant Waiters - CL100';
+
+  Logger.log('SEACHEFS_DEBUG TEST start: brand=%s email=%s textForEmail=%s', brand, email, textForEmail);
+  var result = searchCandidateInSmartsheet_(brand, email, textForEmail);
+  Logger.log('SEACHEFS_DEBUG TEST result=%s', JSON.stringify(result));
+
+  if (!result.ok) {
+    Logger.log('SEACHEFS_DEBUG TEST failed early: code=%s error=%s', String(result.code || ''), String(result.error || ''));
+  } else if (result.found && result.exactMatch) {
+    Logger.log('SEACHEFS_DEBUG TEST exact match: matchedSheetId=%s', String(result.matchedSheetId || ''));
+  } else {
+    Logger.log('SEACHEFS_DEBUG TEST no exact match; inspect SEACHEFS_DEBUG_* logs for per-sheet and per-row mismatch details.');
+  }
+
+  return result;
+}
+
+/**
+ * Diagnostics: verify configured SeaChefs sheet IDs and discover candidate sheets by name.
+ * Run from Apps Script editor: TEST_SeachefsSheetNameDiagnostics()
+ * @returns {Object}
+ */
+function TEST_SeachefsSheetNameDiagnostics() {
+  var brand = 'SEACHEFS';
+  var cfg = getConfig_();
+  var apiToken = cfg.SMARTSHEET_API_TOKEN;
+  if (!apiToken) return { ok: false, error: 'Smartsheet API token not configured', code: 'NO_API_TOKEN' };
+
+  var targetName = 'SEACHEFS_APPLICANT_INTERVIEW_BOOKINGS';
+  var configuredIds = getSmartsheetIdsForBrand_(brand);
+  var configuredSheets = [];
+
+  for (var i = 0; i < configuredIds.length; i++) {
+    var sheetId = configuredIds[i];
+    try {
+      var detailRes = UrlFetchApp.fetch(
+        SMARTSHEET_API_BASE + '/sheets/' + sheetId + '?pageSize=1',
+        {
+          method: 'get',
+          headers: { 'Authorization': 'Bearer ' + apiToken, 'Content-Type': 'application/json' },
+          muteHttpExceptions: true
+        }
+      );
+      var code = detailRes.getResponseCode();
+      if (code === 200) {
+        var detail = JSON.parse(detailRes.getContentText());
+        configuredSheets.push({ sheetId: String(sheetId), sheetName: String(detail.name || ''), status: 'OK' });
+      } else {
+        configuredSheets.push({ sheetId: String(sheetId), sheetName: '', status: 'HTTP_' + code });
+      }
+    } catch (e) {
+      configuredSheets.push({ sheetId: String(sheetId), sheetName: '', status: 'ERROR', message: String(e) });
+    }
+  }
+
+  var discoveredByName = [];
+  try {
+    var listRes = UrlFetchApp.fetch(
+      SMARTSHEET_API_BASE + '/sheets?includeAll=true',
+      {
+        method: 'get',
+        headers: { 'Authorization': 'Bearer ' + apiToken, 'Content-Type': 'application/json' },
+        muteHttpExceptions: true
+      }
+    );
+    if (listRes.getResponseCode() === 200) {
+      var listData = JSON.parse(listRes.getContentText());
+      var sheetList = listData.data || [];
+      var targetUpper = targetName.toUpperCase();
+      for (var s = 0; s < sheetList.length; s++) {
+        var item = sheetList[s] || {};
+        var name = String(item.name || '');
+        if (name.toUpperCase() === targetUpper || name.toUpperCase().indexOf(targetUpper) !== -1) {
+          discoveredByName.push({ sheetId: String(item.id || ''), sheetName: name });
+        }
+      }
+    }
+  } catch (e2) {
+    discoveredByName.push({ sheetId: '', sheetName: '', error: String(e2) });
+  }
+
+  var configuredNamesUpper = configuredSheets.map(function(x) { return String(x.sheetName || '').toUpperCase(); });
+  var configuredHasTarget = configuredNamesUpper.some(function(n) { return n === targetName || n.indexOf(targetName) !== -1; });
+
+  var out = {
+    ok: true,
+    brand: brand,
+    targetName: targetName,
+    configuredIds: configuredIds,
+    configuredSheets: configuredSheets,
+    configuredHasTarget: configuredHasTarget,
+    discoveredByName: discoveredByName
+  };
+
+  Logger.log('SEACHEFS_SHEET_DIAG => %s', JSON.stringify(out));
   return out;
 }
 

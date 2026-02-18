@@ -270,7 +270,7 @@ function startOtpByTextForEmail(params, traceId) {
     return { ok: false, error: 'Could not verify candidate. Please try again later.' };
   }
   if (!searchResult.found || !searchResult.exactMatch) {
-    return { ok: false, error: 'Email and Text For Email do not match our records.' };
+    return { ok: false, error: 'Your email and selected position do not match our records.' };
   }
 
   // 2. Attach Interview Link to candidate so createOtp_ stores it as Position Link
