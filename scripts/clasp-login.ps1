@@ -2,9 +2,19 @@
 # Usage: PowerShell -> .\scripts\clasp-login.ps1
 # Runs `clasp login --no-localhost`, streams output, and opens the authorization URL automatically.
 
+$cmd = Get-Command clasp -ErrorAction SilentlyContinue
+if ($cmd) {
+    $claspExe = $cmd.Path
+    $claspArgs = "login --no-localhost"
+} else {
+    # Fallback to npx to run clasp if global binary not found
+    $claspExe = "npx"
+    $claspArgs = "@google/clasp login --no-localhost"
+}
+
 $psi = New-Object System.Diagnostics.ProcessStartInfo
-$psi.FileName = "clasp"
-$psi.Arguments = "login --no-localhost"
+$psi.FileName = $claspExe
+$psi.Arguments = $claspArgs
 $psi.RedirectStandardOutput = $true
 $psi.RedirectStandardError = $true
 $psi.UseShellExecute = $false

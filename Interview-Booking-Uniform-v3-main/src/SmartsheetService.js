@@ -7,130 +7,124 @@
 var SMARTSHEET_API_BASE = 'https://api.smartsheet.com/2.0';
 
 /**
- * Search for a candidate in Smartsheet by Email + Text For Email
+ * Search for a candidate in Smartsheet by Email + Text For Email.
+ * ANY-sheet match wins: returns on the first exact match found.
+ * Sheets are searched in the configured order for this brand.
  * @param {string} brand - Brand code
  * @param {string} email - Candidate email
  * @param {string} textForEmail - Text For Email value
  * @returns {Object} Search result
  */
 function searchCandidateInSmartsheet_(brand, email, textForEmail) {
-  var cfg = getConfig_();
+  var cfg      = getConfig_();
   var apiToken = cfg.SMARTSHEET_API_TOKEN;
-  
+  var traceId  = generateTraceId_();
+
   if (!apiToken) {
     return { ok: false, error: 'Smartsheet API token not configured', code: 'NO_API_TOKEN' };
   }
-  
-  // Support multiple Smartsheet IDs per brand (comma-separated in props/registry/brand config)
+
   var sheetIds = getSmartsheetIdsForBrand_(brand);
   if (!sheetIds || sheetIds.length === 0) {
     return { ok: false, error: 'Smartsheet ID not configured for brand: ' + brand, code: 'NO_SHEET_ID' };
   }
 
-  try {
-    var b = getBrand_(brand);
-    var emailColumn = b ? b.emailColumn : 'Email';
-    var textForEmailColumn = b ? b.textForEmailColumn : 'Text For Email';
+  // Normalise inputs once
+  var normEmail = String(email        || '').toLowerCase().trim();
+  var normTfe   = String(textForEmail || '').trim().replace(/\s+/g, ' ').toLowerCase();
 
-    var overallMatches = [];
-    var perSheetResults = [];
+  var atLeastOneReadable = false;
 
-    for (var s = 0; s < sheetIds.length; s++) {
-      var sheetId = sheetIds[s];
-      var url = SMARTSHEET_API_BASE + '/sheets/' + sheetId;
-      var options = {
-        method: 'get',
-        headers: {
-          'Authorization': 'Bearer ' + apiToken,
-          'Content-Type': 'application/json'
-        },
-        muteHttpExceptions: true
-      };
+  for (var s = 0; s < sheetIds.length; s++) {
+    var sheetId = sheetIds[s];
+    var response, httpCode;
 
-      var response = UrlFetchApp.fetch(url, options);
-      var code = response.getResponseCode();
-      if (code !== 200) {
-        logEvent_(generateTraceId_(), brand, email, 'SMARTSHEET_API_ERROR', { sheetId: sheetId, code: code });
-        return { ok: false, error: 'Smartsheet API error: ' + code, code: 'API_ERROR' };
-      }
-
-      var data = JSON.parse(response.getContentText());
-      var columns = data.columns || [];
-      var rows = data.rows || [];
-
-      // Find column indices
-      var emailColId = null;
-      var textForEmailColId = null;
-      var columnMap = {};
-      for (var i = 0; i < columns.length; i++) {
-        columnMap[columns[i].id] = columns[i].title;
-        if (columns[i].title === emailColumn) emailColId = columns[i].id;
-        if (columns[i].title === textForEmailColumn) textForEmailColId = columns[i].id;
-      }
-
-      if (!emailColId || !textForEmailColId) {
-        return { ok: false, error: 'Required columns not found in Smartsheet: ' + sheetId, code: 'COLUMN_NOT_FOUND' };
-      }
-
-      var foundExact = false;
-      var foundPartial = false;
-      var matchedRow = null;
-
-      for (var r = 0; r < rows.length; r++) {
-        var row = rows[r];
-        var cells = row.cells || [];
-        var rowEmail = '';
-        var rowTextForEmail = '';
-        var rowData = { rowId: row.id };
-
-        for (var c = 0; c < cells.length; c++) {
-          var cell = cells[c];
-          var colTitle = columnMap[cell.columnId];
-          rowData[colTitle] = cell.displayValue || cell.value || '';
-          if (cell.columnId === emailColId) rowEmail = String(cell.displayValue || cell.value || '').toLowerCase().trim();
-          if (cell.columnId === textForEmailColId) rowTextForEmail = String(cell.displayValue || cell.value || '').trim();
+    try {
+      response = UrlFetchApp.fetch(
+        SMARTSHEET_API_BASE + '/sheets/' + sheetId,
+        {
+          method: 'get',
+          headers: { 'Authorization': 'Bearer ' + apiToken, 'Content-Type': 'application/json' },
+          muteHttpExceptions: true
         }
-
-        var emailMatch = rowEmail === String(email).toLowerCase().trim();
-        var textMatch = rowTextForEmail === String(textForEmail).trim();
-
-        if (emailMatch && textMatch) {
-          foundExact = true;
-          matchedRow = rowData;
-          break; // exact match found in this sheet
-        } else if (emailMatch) {
-          foundPartial = true;
-          if (!matchedRow) matchedRow = rowData;
-        }
-      }
-
-      perSheetResults.push({ sheetId: sheetId, foundExact: foundExact, foundPartial: foundPartial, rowId: matchedRow ? matchedRow.rowId : null });
-      if (foundExact) overallMatches.push(matchedRow);
+      );
+      httpCode = response.getResponseCode();
+    } catch (fetchErr) {
+      logEvent_(traceId, brand, email, 'SMARTSHEET_API_ERROR',
+        { sheetId: sheetId, message: String(fetchErr) });
+      continue;
     }
 
-    // If any configured sheet did not return an exact match, treat as not found
-    for (var k = 0; k < perSheetResults.length; k++) {
-      if (!perSheetResults[k].foundExact) {
-        logEvent_(generateTraceId_(), brand, email, 'SMARTSHEET_MULTI_CHECK_FAILED', { checked: perSheetResults });
-        return { ok: true, found: false, exactMatch: false, checked: perSheetResults, matchCount: overallMatches.length };
-      }
+    if (httpCode !== 200) {
+      logEvent_(traceId, brand, email, 'SMARTSHEET_API_ERROR',
+        { sheetId: sheetId, code: httpCode });
+      continue;
     }
 
-    var candidate = overallMatches.length > 0 ? overallMatches[0] : null;
-    logEvent_(generateTraceId_(), brand, email, 'SMARTSHEET_MULTI_CHECK_OK', { checked: perSheetResults });
-    return {
-      ok: true,
-      found: true,
-      exactMatch: true,
-      candidate: candidate,
-      matchCount: overallMatches.length,
-      checked: perSheetResults
-    };
+    atLeastOneReadable = true;
+    var data    = JSON.parse(response.getContentText());
+    var columns = data.columns || [];
+    var rows    = data.rows    || [];
 
-  } catch (e) {
-    Logger.log('SmartsheetService error: ' + e);
-    return { ok: false, error: 'Smartsheet lookup failed: ' + String(e), code: 'EXCEPTION' };
+    // Locate columns by case-insensitive trimmed title
+    var emailColId         = null;
+    var tfeColId           = null;
+    var interviewLinkColId = null;
+    var columnMap          = {};
+
+    for (var i = 0; i < columns.length; i++) {
+      var col       = columns[i];
+      var normTitle = String(col.title || '').trim().toLowerCase();
+      columnMap[col.id] = col.title;
+      if (normTitle === 'email')           emailColId         = col.id;
+      if (normTitle === 'text for email')  tfeColId           = col.id;
+      if (normTitle === 'interview link')  interviewLinkColId = col.id;
+    }
+
+    if (!emailColId || !tfeColId) {
+      logEvent_(traceId, brand, email, 'SMARTSHEET_API_ERROR',
+        { sheetId: sheetId, message: 'Required columns not found (Email / Text For Email)' });
+      continue;
+    }
+
+    for (var r = 0; r < rows.length; r++) {
+      var row   = rows[r];
+      var cells = row.cells || [];
+      var rowEmail         = '';
+      var rowTfe           = '';
+      var rowInterviewLink = '';
+      var rowData          = { rowId: row.id };
+
+      for (var c = 0; c < cells.length; c++) {
+        var cell    = cells[c];
+        var cellVal = String(cell.displayValue || cell.value || '');
+        rowData[columnMap[cell.columnId]] = cellVal;
+        if (cell.columnId === emailColId)                               rowEmail         = cellVal.toLowerCase().trim();
+        if (cell.columnId === tfeColId)                                 rowTfe           = cellVal.trim().replace(/\s+/g, ' ').toLowerCase();
+        if (interviewLinkColId && cell.columnId === interviewLinkColId) rowInterviewLink = cellVal.trim();
+      }
+
+      if (rowEmail === normEmail && rowTfe === normTfe) {
+        logEvent_(traceId, brand, email, 'MATCH_FOUND', { matchedSheetId: sheetId });
+        return {
+          ok:             true,
+          found:          true,
+          exactMatch:     true,
+          matchedSheetId: sheetId,
+          interviewLink:  rowInterviewLink,
+          candidate:      rowData
+        };
+      }
+    }
   }
+
+  // No exact match across all sheets
+  if (atLeastOneReadable) {
+    logEvent_(traceId, brand, email, 'MATCH_FAIL', { brand: brand });
+    return { ok: true, found: false, exactMatch: false };
+  }
+
+  return { ok: false, error: 'All configured sheets unavailable for brand: ' + brand, code: 'ALL_SHEETS_FAILED' };
 }
 
 
@@ -181,6 +175,78 @@ function getSmartsheetIdsForBrand_(brand) {
  */
 function getCandidateSuggestions_(brand, email) {
   return searchCandidateInSmartsheet_(brand, email, '');
+}
+
+/**
+ * Public: returns sorted unique Text For Email values for a brand from Smartsheet.
+ * Called via google.script.run — no underscore.
+ * @param {string} brand
+ * @returns {string[]}
+ */
+function getTextForEmailOptionsForBrandApi(brand) {
+  brand = String(brand || '').toUpperCase().trim();
+  var traceId  = generateTraceId_();
+  var cacheKey = 'TFE_OPTIONS_' + brand;
+  var cache    = CacheService.getScriptCache();
+
+  var cached = cache.get(cacheKey);
+  if (cached) {
+    try { return JSON.parse(cached); } catch (e) { /* fall through */ }
+  }
+
+  var cfg      = getConfig_();
+  var apiToken = cfg.SMARTSHEET_API_TOKEN;
+  var sheetIds = getSmartsheetIdsForBrand_(brand);
+  var seen     = {};
+  var options  = [];
+
+  if (apiToken && sheetIds && sheetIds.length > 0) {
+    for (var s = 0; s < sheetIds.length; s++) {
+      var sheetId = sheetIds[s];
+      try {
+        var response = UrlFetchApp.fetch(
+          SMARTSHEET_API_BASE + '/sheets/' + sheetId,
+          {
+            method: 'get',
+            headers: { 'Authorization': 'Bearer ' + apiToken, 'Content-Type': 'application/json' },
+            muteHttpExceptions: true
+          }
+        );
+        if (response.getResponseCode() !== 200) continue;
+
+        var data    = JSON.parse(response.getContentText());
+        var columns = data.columns || [];
+        var rows    = data.rows    || [];
+
+        var tfeColId = null;
+        for (var i = 0; i < columns.length; i++) {
+          if (String(columns[i].title || '').trim().toLowerCase() === 'text for email') {
+            tfeColId = columns[i].id;
+            break;
+          }
+        }
+        if (!tfeColId) continue;
+
+        for (var r = 0; r < rows.length; r++) {
+          var cells = rows[r].cells || [];
+          for (var c = 0; c < cells.length; c++) {
+            if (cells[c].columnId === tfeColId) {
+              var val = String(cells[c].displayValue || cells[c].value || '').trim();
+              if (val && !seen[val]) { seen[val] = true; options.push(val); }
+            }
+          }
+        }
+      } catch (e) {
+        logEvent_(traceId, brand, '', 'SMARTSHEET_API_ERROR', { sheetId: sheetId, message: String(e) });
+      }
+    }
+  }
+
+  options.sort(function(a, b) { return a.toLowerCase().localeCompare(b.toLowerCase()); });
+  logEvent_(traceId, brand, '', 'OPTIONS_LOADED', { brand: brand, count: options.length });
+
+  try { cache.put(cacheKey, JSON.stringify(options), 600); } catch (e) { /* ignore */ }
+  return options;
 }
 
 /**

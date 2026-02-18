@@ -4,23 +4,23 @@
   <base target="_top">
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Enter CL Code & Email</title>
+  <title>Interview Booking</title>
   <?!= include_('Styles'); ?>
 </head>
 <body>
   <div class="header">
-    <h1>🔐 Enter CL Code & Email</h1>
-    <div class="user-info">Start here to request your OTP</div>
+    <h1>🔐 Interview Booking</h1>
+    <div class="user-info">Select your details to receive a one-time login code</div>
   </div>
 
   <div class="container">
     <div class="card" style="max-width:600px;margin:40px auto;padding:20px;">
-      <h2>Enter your reference and email</h2>
-      <p class="text-muted">Provide the CLxxx reference and your email to receive an OTP.</p>
+      <h2>Enter your details</h2>
+      <p class="text-muted">Select your brand and position, then enter your email to receive an OTP.</p>
 
       <div style="margin-top:16px;">
         <label for="brand">Brand</label>
-        <select id="brand" class="form-control" onchange="populatePositions()">
+        <select id="brand" class="form-control" onchange="populateTextForEmail()">
           <? for (var i = 0; i < brands.length; i++) { ?>
             <option value="<?= brands[i] ?>"><?= brands[i] ?></option>
           <? } ?>
@@ -28,20 +28,15 @@
       </div>
 
       <div style="margin-top:12px;">
-        <label for="position">Position</label>
-        <select id="position" class="form-control" onchange="onPositionChange()">
-          <option value="">Loading positions…</option>
+        <label for="textForEmail">Text For Email / Position</label>
+        <select id="textForEmail" class="form-control" disabled>
+          <option value="">Loading…</option>
         </select>
       </div>
 
       <div style="margin-top:12px;">
-        <label for="clcode">CL Code</label>
-        <input id="clcode" class="form-control" placeholder="e.g. CL200" />
-      </div>
-
-      <div style="margin-top:12px;">
         <label for="email">Email</label>
-        <input id="email" class="form-control" placeholder="you@example.com" />
+        <input id="email" type="email" class="form-control" placeholder="you@example.com" />
       </div>
 
       <div style="text-align:center;margin-top:18px;">
@@ -55,94 +50,80 @@
   <div class="version-tag">v<?= version ?></div>
 
   <script>
-    function populatePositions() {
+    function populateTextForEmail() {
       var brand = document.getElementById('brand').value;
-      var sel = document.getElementById('position');
-      sel.innerHTML = '<option value="">Loading positions…</option>';
-      google.script.run.withSuccessHandler(function(res) {
-        sel.innerHTML = '';
-        // Add empty first option
-        var emptyOpt = document.createElement('option');
-        emptyOpt.value = '';
-        emptyOpt.text = '-- Select a position --';
-        sel.appendChild(emptyOpt);
-
-        if (!res || res.length === 0) {
-          emptyOpt.text = '-- No positions found --';
-          return;
-        }
-        res.forEach(function(item) {
-          var opt = document.createElement('option');
-          opt.value = item.defaultCLCode || '';
-          var label = item.jobTitle || '(untitled)';
-          var code = item.defaultCLCode || '';
-          opt.text = label + (code ? ' — ' + code : '');
-          opt.dataset.jobTitle = item.jobTitle || '';
-          sel.appendChild(opt);
-        });
-      }).withFailureHandler(function(err) {
-        sel.innerHTML = '<option value="">Error loading positions</option>';
-        console.error('populatePositions error:', err);
-      }).getJobsForBrandApi(brand);
-    }
-
-    function onPositionChange() {
-      var sel = document.getElementById('position');
-      var clIn = document.getElementById('clcode');
-      if (sel && sel.value) clIn.value = sel.value;
-    }
-
-    function startOtp() {
-      var btn = document.getElementById('startBtn');
-      var brand = document.getElementById('brand').value;
-      var clcode = document.getElementById('clcode').value.trim();
-      var email = document.getElementById('email').value.trim();
-      var msg = document.getElementById('msg');
-
-      msg.style.display = 'none';
-
-      // if CL code empty but a position selected, use that
-      if (!clcode) {
-        var sel = document.getElementById('position');
-        if (sel && sel.value) clcode = sel.value;
-      }
-
-      if (!clcode || !email) {
-        msg.style.display = 'block';
-        msg.className = 'alert alert-danger';
-        msg.textContent = 'Please enter both CL code and email.';
-        return;
-      }
-
-      btn.disabled = true;
-      btn.textContent = 'Sending...';
+      var sel   = document.getElementById('textForEmail');
+      sel.innerHTML = '<option value="">Loading…</option>';
+      sel.disabled  = true;
 
       google.script.run
-        .withSuccessHandler(function(res) {
-          btn.disabled = false;
-          btn.textContent = '📧 Send OTP';
-          if (res.ok) {
-            window.location.href = res.verifyUrl;
-          } else {
-            msg.style.display = 'block';
-            msg.className = 'alert alert-danger';
-            msg.textContent = res.error || 'Failed to start OTP flow.';
+        .withSuccessHandler(function(options) {
+          sel.innerHTML = '';
+          sel.disabled  = false;
+          var placeholder = document.createElement('option');
+          placeholder.value = '';
+          placeholder.text  = (options && options.length) ? '-- Select position --' : '-- No positions found --';
+          sel.appendChild(placeholder);
+          if (options && options.length) {
+            options.forEach(function(val) {
+              var opt   = document.createElement('option');
+              opt.value = val;
+              opt.text  = val;
+              sel.appendChild(opt);
+            });
           }
         })
         .withFailureHandler(function(err) {
-          btn.disabled = false;
-          btn.textContent = '📧 Send OTP';
-          msg.style.display = 'block';
-          msg.className = 'alert alert-danger';
-          msg.textContent = err.message || 'An unexpected error occurred.';
+          sel.innerHTML = '<option value="">Error loading positions</option>';
+          sel.disabled  = false;
+          console.error('populateTextForEmail error:', err);
         })
-        .startOtpByBrandCl_({ brand: brand, clCode: clcode, email: email });
+        .getTextForEmailOptionsForBrandApi(brand);
     }
 
-    // populate initial positions on load
-    (function(){
-      try { populatePositions(); } catch(e) { /* ignore */ }
-    })();
+    function startOtp() {
+      var btn          = document.getElementById('startBtn');
+      var brand        = document.getElementById('brand').value.trim();
+      var textForEmail = document.getElementById('textForEmail').value.trim();
+      var email        = document.getElementById('email').value.trim();
+
+      showMsg('', '');
+
+      if (!brand) { showMsg('danger', 'Please select a brand.'); return; }
+      if (!textForEmail) { showMsg('danger', 'Please select a position (Text For Email).'); return; }
+      if (!email) { showMsg('danger', 'Please enter your email address.'); return; }
+
+      btn.disabled    = true;
+      btn.textContent = 'Sending…';
+
+      google.script.run
+        .withSuccessHandler(function(res) {
+          btn.disabled    = false;
+          btn.textContent = '📧 Send OTP';
+          if (res && res.ok) {
+            window.location.href = res.verifyUrl;
+          } else {
+            showMsg('danger', (res && res.error) || 'Failed to start OTP flow.');
+          }
+        })
+        .withFailureHandler(function(err) {
+          btn.disabled    = false;
+          btn.textContent = '📧 Send OTP';
+          showMsg('danger', (err && err.message) || 'An unexpected error occurred.');
+        })
+        .startOtpByTextForEmail({ brand: brand, email: email, textForEmail: textForEmail });
+    }
+
+    function showMsg(type, text) {
+      var msg = document.getElementById('msg');
+      if (!type && !text) { msg.style.display = 'none'; return; }
+      msg.style.display = 'block';
+      msg.className     = 'alert alert-' + type;
+      msg.textContent   = text;
+    }
+
+    // Populate on page load
+    (function() { try { populateTextForEmail(); } catch(e) {} })();
   </script>
 </body>
 </html>
