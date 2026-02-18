@@ -268,8 +268,45 @@ function getTextForEmailOptionsForBrandApi(brand) {
 }
 
 /**
+ * Diagnostics: verify brand -> Smartsheet sheet ID resolution.
+ * Logs whether IDs are valid-looking (not placeholders) for ROYAL/COSTA/SEACHEFS.
+ * Run from Apps Script editor: TEST_BrandSheetResolution()
+ * @returns {Object}
+ */
+function TEST_BrandSheetResolution() {
+  var brands = ['ROYAL', 'COSTA', 'SEACHEFS'];
+  var out = {};
+
+  function isPlaceholder_(value) {
+    var v = String(value || '').toUpperCase();
+    return !v || v.indexOf('PLACEHOLDER') !== -1;
+  }
+
+  for (var i = 0; i < brands.length; i++) {
+    var brand = brands[i];
+    var ids = getSmartsheetIdsForBrand_(brand);
+    var validFlags = ids.map(function(id) { return !isPlaceholder_(id); });
+
+    out[brand] = {
+      sheetIds: ids,
+      hasAnyIds: ids.length > 0,
+      allValid: ids.length > 0 && validFlags.every(function(v) { return v; }),
+      validFlags: validFlags
+    };
+
+    Logger.log('%s => sheetIds=%s validFlags=%s allValid=%s',
+      brand,
+      JSON.stringify(ids),
+      JSON.stringify(validFlags),
+      out[brand].allValid);
+  }
+
+  return out;
+}
+
+/**
  * Quick diagnostics helper for brand option loading.
- * Prints loaded sheet IDs count and Text For Email options count for ROYAL/COSTA/SEACHEFS.
+ * Logs number of Text For Email options and first 10 options for ROYAL/COSTA/SEACHEFS.
  * Run from Apps Script editor: TEST_BrandOptionsCounts()
  * @returns {Object}
  */
@@ -279,20 +316,18 @@ function TEST_BrandOptionsCounts() {
 
   for (var i = 0; i < brands.length; i++) {
     var brand = brands[i];
-    var sheetIds = getSmartsheetIdsForBrand_(brand);
     var options = getTextForEmailOptionsForBrandApi(brand);
+    var first10 = options.slice(0, 10);
 
     out[brand] = {
-      sheetIdsCount: sheetIds.length,
-      sheetIds: sheetIds,
-      optionsCount: options.length
+      optionsCount: options.length,
+      first10: first10
     };
 
-    Logger.log('%s => sheetIdsCount=%s optionsCount=%s sheetIds=%s',
+    Logger.log('%s => optionsCount=%s first10=%s',
       brand,
-      sheetIds.length,
       options.length,
-      JSON.stringify(sheetIds));
+      JSON.stringify(first10));
   }
 
   return out;

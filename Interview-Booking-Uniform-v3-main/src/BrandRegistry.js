@@ -36,7 +36,7 @@ var BRANDS = {
   SEACHEFS: {
     name: 'Seachefs',
     code: 'SEACHEFS',
-    smartsheetId: '8560707416051588',
+    smartsheetId: '356995853930372',
     emailColumnId: '2951912162545540',
     textForEmailColumnId: '6048136906362756',
     emailColumn: 'Email',
