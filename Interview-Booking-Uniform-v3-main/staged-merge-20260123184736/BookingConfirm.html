@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Confirm Booking – <?= brandName ?></title>
+  <?!= include_('Styles'); ?>
+  <style>
+    .hero-banner {
+      background: linear-gradient(135deg, #155724, #28a745);
+      padding: 30px 20px;
+      text-align: center;
+      color: white;
+    }
+    .success-icon {
+      font-size: 60px;
+      margin-bottom: 10px;
+    }
+    .booking-card {
+      max-width: 500px;
+      margin: 20px auto;
+      text-align: center;
+    }
+    .booking-details {
+      background: #e3f2fd;
+      border-radius: 8px;
+      padding: 20px;
+      margin: 20px 0;
+      text-align: left;
+    }
+    .booking-details p {
+      margin: 10px 0;
+    }
+    .warning-box {
+      background: #fff3cd;
+      border: 1px solid #ffc107;
+      border-radius: 8px;
+      padding: 15px;
+      margin: 20px 0;
+    }
+    .checklist {
+      list-style: none;
+      padding: 0;
+      text-align: left;
+    }
+    .checklist li {
+      padding: 8px 0;
+      color: #28a745;
+    }
+    .checklist li::before {
+      content: "✅ ";
+    }
+  </style>
+</head>
+<body>
+  <div class="hero-banner">
+    <div class="success-icon">✅</div>
+    <h2>You're Verified!</h2>
+    <p>Ready to book your interview</p>
+  </div>
+  
+  <div class="container">
+    <div class="card booking-card">
+      <h3>📅 Interview Booking</h3>
+      
+      <div class="booking-details">
+        <p><strong>Position:</strong> <?= textForEmail ?></p>
+        <? if (recruiterName) { ?>
+        <p><strong>Recruiter:</strong> <?= recruiterName ?></p>
+        <? } ?>
+        <? if (clCode) { ?>
+        <p><strong>Reference:</strong> <?= clCode ?></p>
+        <? } ?>
+      </div>
+      
+      <div class="warning-box">
+        <p style="margin: 0;">
+          ⚠️ <strong>Important:</strong> This booking link can only be used once.
+        </p>
+      </div>
+      
+      <h4>Before you click:</h4>
+      <ul class="checklist">
+        <li>Be ready to complete your booking now</li>
+        <li>Have your calendar open</li>
+        <li>Choose a time that works for you</li>
+      </ul>
+      
+      <!-- Scanner-safe: Form submits POST to prevent scanners from burning the link -->
+      <form method="POST" action="<?= webAppUrl ?>" style="margin: 30px 0;">
+        <input type="hidden" name="action" value="redirect">
+        <input type="hidden" name="brand" value="<?= brand ?>">
+        <input type="hidden" name="email" value="<?= email ?>">
+        <input type="hidden" name="url" value="<?= bookingUrl ?>">
+        
+        <button type="submit" class="btn btn-success" style="padding: 15px 40px; font-size: 18px; width: 100%;">
+          📅 Book Your Interview Now
+        </button>
+      </form>
+      
+      <p style="color: #666; font-size: 12px;">
+        By clicking, you'll be redirected to the calendar scheduling page.
+      </p>
+    </div>
+  </div>
+  
+  <div class="version-tag">v<?= version ?></div>
+</body>
+</html>

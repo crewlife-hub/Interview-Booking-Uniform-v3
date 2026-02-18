@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Enter CL Code & Email</title>
+  <?!= include_('Styles'); ?>
+</head>
+<body>
+  <div class="header">
+    <h1>🔐 Enter CL Code & Email</h1>
+    <div class="user-info">Start here to request your OTP</div>
+  </div>
+
+  <div class="container">
+    <div class="card" style="max-width:600px;margin:40px auto;padding:20px;">
+      <h2>Enter your reference and email</h2>
+      <p class="text-muted">Provide the CLxxx reference and your email to receive an OTP.</p>
+
+      <div style="margin-top:16px;">
+        <label for="brand">Brand</label>
+        <select id="brand" class="form-control" onchange="populatePositions()">
+          <? for (var i = 0; i < brands.length; i++) { ?>
+            <option value="<?= brands[i] ?>"><?= brands[i] ?></option>
+          <? } ?>
+        </select>
+      </div>
+
+      <div style="margin-top:12px;">
+        <label for="position">Position</label>
+        <select id="position" class="form-control" onchange="onPositionChange()">
+          <option value="">Loading positions…</option>
+        </select>
+      </div>
+
+      <div style="margin-top:12px;">
+        <label for="clcode">CL Code</label>
+        <input id="clcode" class="form-control" placeholder="e.g. CL200" />
+      </div>
+
+      <div style="margin-top:12px;">
+        <label for="email">Email</label>
+        <input id="email" class="form-control" placeholder="you@example.com" />
+      </div>
+
+      <div style="text-align:center;margin-top:18px;">
+        <button id="startBtn" class="btn btn-primary" onclick="startOtp()">📧 Send OTP</button>
+      </div>
+
+      <div id="msg" style="margin-top:16px;display:none"></div>
+    </div>
+  </div>
+
+  <div class="version-tag">v<?= version ?></div>
+
+  <script>
+    function populatePositions() {
+      var brand = document.getElementById('brand').value;
+      var sel = document.getElementById('position');
+      sel.innerHTML = '<option value="">Loading positions…</option>';
+      google.script.run.withSuccessHandler(function(res) {
+        sel.innerHTML = '';
+        // Add empty first option
+        var emptyOpt = document.createElement('option');
+        emptyOpt.value = '';
+        emptyOpt.text = '-- Select a position --';
+        sel.appendChild(emptyOpt);
+
+        if (!res || res.length === 0) {
+          emptyOpt.text = '-- No positions found --';
+          return;
+        }
+        res.forEach(function(item) {
+          var opt = document.createElement('option');
+          opt.value = item.defaultCLCode || '';
+          var label = item.jobTitle || '(untitled)';
+          var code = item.defaultCLCode || '';
+          opt.text = label + (code ? ' — ' + code : '');
+          opt.dataset.jobTitle = item.jobTitle || '';
+          sel.appendChild(opt);
+        });
+      }).withFailureHandler(function(err) {
+        sel.innerHTML = '<option value="">Error loading positions</option>';
+        console.error('populatePositions error:', err);
+      }).getJobsForBrandApi(brand);
+    }
+
+    function onPositionChange() {
+      var sel = document.getElementById('position');
+      var clIn = document.getElementById('clcode');
+      if (sel && sel.value) clIn.value = sel.value;
+    }
+
+    function startOtp() {
+      var btn = document.getElementById('startBtn');
+      var brand = document.getElementById('brand').value;
+      var clcode = document.getElementById('clcode').value.trim();
+      var email = document.getElementById('email').value.trim();
+      var msg = document.getElementById('msg');
+
+      msg.style.display = 'none';
+
+      // if CL code empty but a position selected, use that
+      if (!clcode) {
+        var sel = document.getElementById('position');
+        if (sel && sel.value) clcode = sel.value;
+      }
+
+      if (!clcode || !email) {
+        msg.style.display = 'block';
+        msg.className = 'alert alert-danger';
+        msg.textContent = 'Please enter both CL code and email.';
+        return;
+      }
+
+      btn.disabled = true;
+      btn.textContent = 'Sending...';
+
+      google.script.run
+        .withSuccessHandler(function(res) {
+          btn.disabled = false;
+          btn.textContent = '📧 Send OTP';
+          if (res.ok) {
+            window.location.href = res.verifyUrl;
+          } else {
+            msg.style.display = 'block';
+            msg.className = 'alert alert-danger';
+            msg.textContent = res.error || 'Failed to start OTP flow.';
+          }
+        })
+        .withFailureHandler(function(err) {
+          btn.disabled = false;
+          btn.textContent = '📧 Send OTP';
+          msg.style.display = 'block';
+          msg.className = 'alert alert-danger';
+          msg.textContent = err.message || 'An unexpected error occurred.';
+        })
+        .startOtpByBrandCl_({ brand: brand, clCode: clcode, email: email });
+    }
+
+    // populate initial positions on load
+    (function(){
+      try { populatePositions(); } catch(e) { /* ignore */ }
+    })();
+  </script>
+</body>
+</html>

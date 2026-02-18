@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CrewLife Interview Bookings</title>
+  <?!= include_('Styles'); ?>
+</head>
+<body>
+  <div class="header">
+    <h1>🚢 CrewLife Interview Bookings</h1>
+    <div class="user-info">Unified Booking System</div>
+  </div>
+  
+  <div class="container">
+    <div class="card text-center" style="max-width: 600px; margin: 40px auto;">
+      <h2>Select a Brand</h2>
+      <p class="text-muted">Choose the brand to access the Admin Console</p>
+      
+      <div class="grid grid-2 mt-3">
+        <? for (var i = 0; i < brands.length; i++) { ?>
+          <a href="?page=admin&brand=<?= brands[i] ?>" class="card brand-card" style="text-decoration: none; color: inherit;">
+            <div class="icon">
+              <? if (brands[i] === 'ROYAL') { ?>🛳️<? } ?>
+              <? if (brands[i] === 'COSTA') { ?>⛴️<? } ?>
+              <? if (brands[i] === 'SEACHEFS') { ?>👨‍🍳<? } ?>
+              <? if (brands[i] === 'CPD') { ?>📋<? } ?>
+            </div>
+            <h3><?= brands[i] ?></h3>
+            <span class="text-muted">Admin Console</span>
+          </a>
+        <? } ?>
+      </div>
+    </div>
+    
+    <div class="text-center text-muted mt-3">
+      <p>For diagnostics, visit: <code>?page=diag&brand=BRAND</code></p>
+    </div>
+  </div>
+  
+  <div class="version-tag">v<?= version ?></div>
+</body>
+</html>

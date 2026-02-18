@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Admin Console – <?= brandName ?></title>
+  <?!= include_('Styles'); ?>
+</head>
+<body>
+  <div class="header">
+    <h1>🚢 <?= brandName ?> – Admin Console</h1>
+    <div class="user-info">
+      <?= userEmail ?> | <a href="?" style="color: white;">Switch Brand</a>
+    </div>
+  </div>
+  
+  <div class="container">
+    <? if (safeMode) { ?>
+    <div class="alert alert-warning">
+      ⚠️ <strong>Safe Mode Enabled:</strong> Smartsheet writes are disabled. Read-only operations only.
+    </div>
+    <? } ?>
+    
+    <!-- Candidate Lookup Section -->
+    <div class="card">
+      <div class="card-header">
+        <h3>🔍 Candidate Lookup</h3>
+      </div>
+      
+      <div class="grid grid-2">
+        <div class="form-group">
+          <label for="email">Candidate Email *</label>
+          <input type="email" id="email" class="form-control" placeholder="candidate@email.com" required>
+        </div>
+        <div class="form-group">
+          <label for="textForEmail">Text For Email</label>
+          <input type="text" id="textForEmail" class="form-control" placeholder="e.g., Shop Attendant - CL200">
+          <small class="text-muted">Enter for exact match, or leave blank to see suggestions</small>
+        </div>
+      </div>
+      
+      <button type="button" id="btnLookup" class="btn btn-primary" onclick="doLookup()">
+        🔍 Search Smartsheet
+      </button>
+    </div>
+    
+    <!-- Search Results Section -->
+    <div class="card hidden" id="resultCard">
+      <div class="card-header">
+        <h3>📋 Search Result</h3>
+      </div>
+      <div id="resultContent"></div>
+    </div>
+    
+    <!-- CL Code Management Section -->
+    <div class="card">
+      <div class="card-header">
+        <h3>⚙️ CL Code Management</h3>
+      </div>
+      
+      <table class="table" id="clCodesTable">
+        <thead>
+          <tr>
+            <th>CL Code</th>
+            <th>Recruiter</th>
+            <th>Booking URL</th>
+            <th>Active</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="clCodesBody">
+          <!-- Populated by JS -->
+        </tbody>
+      </table>
+    </div>
+    
+    <!-- Recent Activity Section -->
+    <div class="card">
+      <div class="card-header">
+        <h3>📊 Recent Activity</h3>
+      </div>
+      <table class="table" id="logsTable">
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>Event</th>
+            <th>Email</th>
+            <th>Details</th>
+          </tr>
+        </thead>
+        <tbody id="logsBody">
+          <!-- Populated by JS -->
+        </tbody>
+      </table>
+    </div>
+  </div>
+  
+  <div class="version-tag">v<?= version ?></div>
+  
+  <script>
+    var BRAND = '<?= brand ?>';
+    var clCodes = <?!= clCodes ?>;
+    var jobs = <?!= jobs ?>;
+    var recentLogs = <?!= recentLogs ?>;
+    
+    // Initialize on load
+    document.addEventListener('DOMContentLoaded', function() {
+      renderCLCodes();
+      renderLogs();
+    });
+    
+    function renderCLCodes() {
+      var tbody = document.getElementById('clCodesBody');
+      tbody.innerHTML = '';
+      
+      clCodes.forEach(function(cl) {
+        var tr = document.createElement('tr');
+        tr.innerHTML = 
+          '<td><strong>' + escapeHtml(cl.clCode) + '</strong></td>' +
+          '<td>' + escapeHtml(cl.recruiterName || '-') + '<br><small class="text-muted">' + escapeHtml(cl.recruiterEmail || '') + '</small></td>' +
+          '<td><input type="text" class="form-control" style="width:300px" id="url_' + cl.clCode + '" value="' + escapeHtml(cl.bookingUrl || '') + '"></td>' +
+          '<td>' + (cl.active ? '<span class="badge badge-success">Active</span>' : '<span class="badge badge-secondary">Inactive</span>') + '</td>' +
+          '<td><button class="btn btn-secondary" onclick="updateUrl(\'' + cl.clCode + '\')">Save URL</button></td>';
+        tbody.appendChild(tr);
+      });
+      
+      if (clCodes.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">No CL codes configured. Add them in the Config Sheet.</td></tr>';
+      }
+    }
+    
+    function renderLogs() {
+      var tbody = document.getElementById('logsBody');
+      tbody.innerHTML = '';
+      
+      recentLogs.forEach(function(log) {
+        var tr = document.createElement('tr');
+        var time = log.Timestamp ? new Date(log.Timestamp).toLocaleString() : '-';
+        tr.innerHTML = 
+          '<td><small>' + time + '</small></td>' +
+          '<td><span class="badge badge-info">' + escapeHtml(log.Event || '') + '</span></td>' +
+          '<td>' + escapeHtml(log['Email (Masked)'] || '-') + '</td>' +
+          '<td><small class="text-muted">' + escapeHtml(String(log.Details || '').substring(0, 50)) + '</small></td>';
+        tbody.appendChild(tr);
+      });
+      
+      if (recentLogs.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted">No recent activity</td></tr>';
+      }
+    }
+    
+    function doLookup() {
+      var email = document.getElementById('email').value.trim();
+      var textForEmail = document.getElementById('textForEmail').value.trim();
+      
+      if (!email) {
+        alert('Email is required');
+        return;
+      }
+      
+      var btn = document.getElementById('btnLookup');
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner"></span> Searching...';
+      
+      google.script.run
+        .withSuccessHandler(function(result) {
+          btn.disabled = false;
+          btn.innerHTML = '🔍 Search Smartsheet';
+          showResult(result, email, textForEmail);
+        })
+        .withFailureHandler(function(err) {
+          btn.disabled = false;
+          btn.innerHTML = '🔍 Search Smartsheet';
+          alert('Error: ' + err.message);
+        })
+        .handleAdminPost_({
+          action: 'lookup',
+          brand: BRAND,
+          email: email,
+          textForEmail: textForEmail
+        }, 'web-' + Date.now());
+    }
+    
+    function showResult(result, email, textForEmail) {
+      var card = document.getElementById('resultCard');
+      var content = document.getElementById('resultContent');
+      card.classList.remove('hidden');
+      
+      if (!result.ok) {
+        content.innerHTML = '<div class="alert alert-danger">' + escapeHtml(result.error) + '</div>';
+        return;
+      }
+      
+      if (!result.found) {
+        content.innerHTML = '<div class="alert alert-warning">No candidate found with this email in Smartsheet.</div>';
+        return;
+      }
+      
+      if (result.exactMatch) {
+        var cl = result.clResolution || {};
+        var html = '<div class="alert alert-success">✅ Exact Match Found</div>';
+        html += '<table class="table">';
+        html += '<tr><th>Email</th><td>' + escapeHtml(email) + '</td></tr>';
+        html += '<tr><th>Text For Email</th><td>' + escapeHtml(result.candidate['Text For Email'] || textForEmail) + '</td></tr>';
+        
+        if (cl.ok) {
+          html += '<tr><th>Resolved CL Code</th><td><span class="badge badge-success">' + escapeHtml(cl.clCode) + '</span></td></tr>';
+          html += '<tr><th>Recruiter</th><td>' + escapeHtml(cl.recruiterName || '-') + '</td></tr>';
+          html += '<tr><th>Booking URL</th><td><a href="' + escapeHtml(cl.bookingUrl || '#') + '" target="_blank">' + escapeHtml(cl.bookingUrl || 'Not configured') + '</a></td></tr>';
+        } else {
+          html += '<tr><th>CL Resolution</th><td class="text-danger">⚠️ ' + escapeHtml(cl.error || 'Could not resolve') + '</td></tr>';
+        }
+        html += '</table>';
+        
+        // Token history
+        if (result.tokenHistory && result.tokenHistory.length > 0) {
+          html += '<h4 class="mt-2">Token History</h4>';
+          html += '<table class="table"><thead><tr><th>Status</th><th>Created</th><th>Expiry</th></tr></thead><tbody>';
+          result.tokenHistory.forEach(function(t) {
+            var statusClass = t.Status === 'USED' ? 'badge-success' : (t.Status === 'ISSUED' || t.Status === 'CONFIRMED' ? 'badge-warning' : 'badge-secondary');
+            html += '<tr><td><span class="badge ' + statusClass + '">' + t.Status + '</span></td>';
+            html += '<td>' + (t['Created At'] ? new Date(t['Created At']).toLocaleString() : '-') + '</td>';
+            html += '<td>' + (t.Expiry ? new Date(t.Expiry).toLocaleString() : '-') + '</td></tr>';
+          });
+          html += '</tbody></table>';
+        }
+        
+        // Action buttons
+        html += '<div class="mt-2">';
+        if (cl.ok) {
+          var hasActive = result.tokenHistory && result.tokenHistory.some(function(t) { return t.Status === 'ISSUED' || t.Status === 'CONFIRMED'; });
+          if (hasActive) {
+            html += '<button class="btn btn-warning" onclick="doReissue(\'' + escapeHtml(email) + '\', \'' + escapeHtml(result.candidate['Text For Email'] || textForEmail) + '\')">🔄 Re-issue Link</button> ';
+          } else {
+            html += '<button class="btn btn-success" onclick="doSend(\'' + escapeHtml(email) + '\', \'' + escapeHtml(result.candidate['Text For Email'] || textForEmail) + '\')">📧 Send Invite</button> ';
+          }
+        }
+        html += '</div>';
+        
+        content.innerHTML = html;
+      } else {
+        // Partial matches - show suggestions
+        var html = '<div class="alert alert-info">📝 Found ' + result.candidates.length + ' record(s) for this email. Select the correct Text For Email:</div>';
+        html += '<ul>';
+        result.suggestions.forEach(function(s, idx) {
+          html += '<li><a href="#" onclick="selectTextForEmail(\'' + escapeHtml(s) + '\'); return false;">' + escapeHtml(s) + '</a></li>';
+        });
+        html += '</ul>';
+        content.innerHTML = html;
+      }
+    }
+    
+    function selectTextForEmail(text) {
+      document.getElementById('textForEmail').value = text;
+      doLookup();
+    }
+    
+    function doSend(email, textForEmail) {
+      if (!confirm('Send booking invite to ' + email + '?')) return;
+      
+      google.script.run
+        .withSuccessHandler(function(result) {
+          if (result.ok) {
+            alert('✅ ' + result.message);
+            doLookup(); // Refresh
+          } else {
+            alert('❌ ' + result.error);
+          }
+        })
+        .withFailureHandler(function(err) {
+          alert('Error: ' + err.message);
+        })
+        .handleAdminPost_({
+          action: 'send',
+          brand: BRAND,
+          email: email,
+          textForEmail: textForEmail
+        }, 'web-' + Date.now());
+    }
+    
+    function doReissue(email, textForEmail) {
+      if (!confirm('This will revoke all active links and send a new one. Continue?')) return;
+      
+      google.script.run
+        .withSuccessHandler(function(result) {
+          if (result.ok) {
+            alert('✅ ' + result.message);
+            doLookup(); // Refresh
+          } else {
+            alert('❌ ' + result.error);
+          }
+        })
+        .withFailureHandler(function(err) {
+          alert('Error: ' + err.message);
+        })
+        .handleAdminPost_({
+          action: 'reissue',
+          brand: BRAND,
+          email: email,
+          textForEmail: textForEmail
+        }, 'web-' + Date.now());
+    }
+    
+    function updateUrl(clCode) {
+      var input = document.getElementById('url_' + clCode);
+      var newUrl = input.value.trim();
+      
+      if (!newUrl) {
+        alert('URL cannot be empty');
+        return;
+      }
+      
+      google.script.run
+        .withSuccessHandler(function(result) {
+          if (result.ok) {
+            alert('✅ URL updated successfully');
+          } else {
+            alert('❌ ' + result.error);
+          }
+        })
+        .withFailureHandler(function(err) {
+          alert('Error: ' + err.message);
+        })
+        .handleAdminPost_({
+          action: 'updateurl',
+          brand: BRAND,
+          clCode: clCode,
+          newUrl: newUrl
+        }, 'web-' + Date.now());
+    }
+    
+    function escapeHtml(str) {
+      if (!str) return '';
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+  </script>
+</body>
+</html>

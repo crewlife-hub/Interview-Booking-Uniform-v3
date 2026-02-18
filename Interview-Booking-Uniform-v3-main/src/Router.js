@@ -1,0 +1,259 @@
+/**
+ * Router.gs
+ * HTTP entry points (doGet/doPost), page routing, global error handling.
+ * CrewLife Interview Bookings Uniform Core
+ */
+
+/**
+ * Handle GET requests
+ * @param {Object} e - Event object with parameters
+ * @returns {HtmlOutput|TextOutput} Response
+ */
+function doGet(e) {
+  var traceId = generateTraceId_();
+  try {
+    var params = e && e.parameter ? e.parameter : {};
+    var page = (params.page || '').toLowerCase();
+    var brand = (params.brand || '').toUpperCase();
+    var token = params.token || '';
+
+    // Route: No brand → Brand selector
+    if (!brand && !page) {
+      return serveBrandSelector_();
+    }
+
+    // Route: Diagnostics (self-test)
+    if (page === 'diag') {
+      return serveDiagPage_(brand, traceId);
+    }
+
+    // Route: Admin console (disabled) — redirect to start page
+    if (page === 'admin') {
+      // Admin Console removed; show public start page instead
+      return serveBrandSelector_();
+    }
+
+    // Route: Admin data debug (returns JSON used to render admin UI)
+    if (page === 'admindata') {
+      return serveAdminData_(brand, params, traceId);
+    }
+
+    // Route: OTP request page (from Smartsheet email signed link)
+    if (page === 'otp') {
+      return serveOtpRequestPage_(params, traceId);
+    }
+
+    // Route: OTP verification page
+    if (page === 'verify') {
+      return serveOtpVerifyPage_(params, traceId);
+    }
+
+    // Route: Booking confirmation page (scanner-safe)
+    if (page === 'booking') {
+      return serveBookingConfirmPage_(params, traceId);
+    }
+
+    // Route: Token verification (legacy candidate flow)
+    if (token) {
+      return serveCandidateConfirm_(brand, token, traceId);
+    }
+
+    // Route: Brand landing (shouldn't happen normally, redirect to admin)
+    if (brand && isValidBrand_(brand)) {
+      return serveAdminConsole_(brand, params, traceId);
+    }
+
+    // Fallback: Brand selector
+    return serveBrandSelector_();
+
+  } catch (err) {
+    logEvent_(traceId, '', '', 'ROUTER_ERROR', { error: String(err), stack: err.stack });
+    return serveErrorPage_('System Error', 'An unexpected error occurred. Please try again.', traceId);
+  }
+}
+
+/**
+ * Handle POST requests
+ * @param {Object} e - Event object with parameters
+ * @returns {HtmlOutput|TextOutput} Response
+ */
+function doPost(e) {
+  var traceId = generateTraceId_();
+  try {
+    var params = e && e.parameter ? e.parameter : {};
+    var page = (params.page || '').toLowerCase();
+    var action = (params.action || '').toLowerCase();
+
+    // Route: Admin actions
+    if (page === 'admin') {
+      return handleAdminPost_(params, traceId);
+    }
+
+    // Route: OTP request submission
+    if (action === 'requestotp') {
+      return handleOtpRequest_(params, traceId);
+    }
+
+    // Route: OTP verification submission
+    if (action === 'verifyotp') {
+      return handleOtpVerify_(params, traceId);
+    }
+
+    // Route: Generate signed URL (for Smartsheet webhook)
+    if (action === 'generatesignedurl') {
+      return handleGenerateSignedUrl_(params, traceId);
+    }
+
+    // Route: Booking redirect (scanner-safe POST)
+    if (action === 'redirect') {
+      var bookingUrl = params.url;
+      if (bookingUrl) {
+        logEvent_(traceId, params.brand || '', params.email || '', 'BOOKING_REDIRECT', { url: maskUrl_(bookingUrl) });
+        return HtmlService.createHtmlOutput(
+          '<html><head><meta http-equiv="refresh" content="0;url=' + bookingUrl + '"></head>' +
+          '<body>Redirecting to booking page...</body></html>'
+        );
+      }
+      return serveErrorPage_('Invalid Request', 'Missing booking URL', traceId);
+    }
+
+    // Route: Token confirmation (candidate confirms booking)
+    if (page === 'confirm' || action === 'confirm') {
+      return handleCandidateConfirmPost_(params, traceId);
+    }
+
+    // Route: Legacy verify (backwards compatibility)
+    if (page === 'verify') {
+      return handleAdminPost_(params, traceId);
+    }
+
+    return jsonResponse_({ ok: false, error: 'Unknown POST action' });
+
+  } catch (err) {
+    logEvent_(traceId, '', '', 'ROUTER_ERROR', { error: String(err), stack: err.stack });
+    return serveErrorPage_('System Error', 'An unexpected error occurred. Please try again.', traceId);
+  }
+}
+
+/**
+ * Serve brand selector page
+ * @returns {HtmlOutput}
+ */
+function serveBrandSelector_() {
+  ensureConfigSheetTabs_();
+  var template = HtmlService.createTemplateFromFile('BrandSelector');
+  template.brands = getAllBrandCodes_();
+  template.version = APP_VERSION;
+  return template.evaluate()
+    .setTitle('CrewLife Interview Bookings')
+    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+}
+
+/**
+ * Serve diagnostics / self-test page
+ * Confirms: config sheet, TOKENS headers, sends test email to admin
+ * @param {string} brand - Brand code (optional)
+ * @param {string} traceId - Trace ID
+ * @returns {HtmlOutput}
+ */
+function serveDiagPage_(brand, traceId) {
+  var results = [];
+  var ok = true;
+  
+  // 1. Config sheet accessible
+  try {
+    var ss = getConfigSheet_();
+    results.push({ test: 'Config Sheet', ok: true, detail: 'ID=' + ss.getId() });
+  } catch (e) {
+    results.push({ test: 'Config Sheet', ok: false, detail: String(e) });
+    ok = false;
+  }
+  
+  // 2. TOKENS sheet and headers
+  try {
+    var ss = getConfigSheet_();
+    var sheet = ss.getSheetByName('TOKENS');
+    if (!sheet) throw new Error('TOKENS sheet missing');
+    var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+    var expected = ['Token', 'Email', 'Email Hash', 'Text For Email', 'Brand', 'CL Code', 'Status', 'Expiry', 'Created At', 'Used At', 'Issued By', 'Trace ID', 'OTP', 'Attempts'];
+    var missing = [];
+    for (var i = 0; i < expected.length; i++) {
+      if (headers.indexOf(expected[i]) === -1) missing.push(expected[i]);
+    }
+    if (missing.length > 0) {
+      results.push({ test: 'TOKENS Headers', ok: false, detail: 'Missing: ' + missing.join(', ') });
+      ok = false;
+    } else {
+      results.push({ test: 'TOKENS Headers', ok: true, detail: 'All ' + expected.length + ' headers present' });
+    }
+  } catch (e) {
+    results.push({ test: 'TOKENS Headers', ok: false, detail: String(e) });
+    ok = false;
+  }
+  
+  // 3. Web app URL check
+  try {
+    var url = getWebAppUrl_();
+    var isExec = url.indexOf('/exec') !== -1;
+    results.push({ test: 'Web App URL', ok: isExec, detail: url.substring(0, 80) + (isExec ? '' : ' WARNING: not /exec') });
+    if (!isExec) ok = false;
+  } catch (e) {
+    results.push({ test: 'Web App URL', ok: false, detail: String(e) });
+    ok = false;
+  }
+  
+  // 4. Email quota
+  try {
+    var quota = MailApp.getRemainingDailyQuota();
+    results.push({ test: 'Email Quota', ok: quota > 0, detail: quota + ' remaining' });
+    if (quota <= 0) ok = false;
+  } catch (e) {
+    results.push({ test: 'Email Quota', ok: false, detail: String(e) });
+    ok = false;
+  }
+  
+  // 5. BookingEmail template exists
+  try {
+    HtmlService.createTemplateFromFile('BookingEmail');
+    results.push({ test: 'BookingEmail Template', ok: true, detail: 'Found' });
+  } catch (e) {
+    results.push({ test: 'BookingEmail Template', ok: false, detail: 'Not found: ' + String(e) });
+    ok = false;
+  }
+  
+  // 6. Active user (execution context)
+  try {
+    var user = Session.getActiveUser().getEmail() || 'anonymous';
+    var effective = Session.getEffectiveUser().getEmail() || 'unknown';
+    results.push({ test: 'Execution Context', ok: true, detail: 'Active=' + user + ', Effective=' + effective });
+  } catch (e) {
+    results.push({ test: 'Execution Context', ok: false, detail: String(e) });
+  }
+  
+  // Build HTML output
+  var html = '<html><head><meta charset="utf-8"><title>Diagnostics</title><style>body{font-family:sans-serif;padding:20px;}table{border-collapse:collapse;width:100%;}th,td{border:1px solid #ccc;padding:8px;text-align:left;}.ok{color:green;}.fail{color:red;font-weight:bold;}</style></head><body>';
+  html += '<h1>System Diagnostics</h1>';
+  html += '<p>Trace ID: <code>' + traceId + '</code></p>';
+  html += '<table><tr><th>Test</th><th>Status</th><th>Detail</th></tr>';
+  for (var r = 0; r < results.length; r++) {
+    var row = results[r];
+    html += '<tr><td>' + row.test + '</td><td class="' + (row.ok ? 'ok' : 'fail') + '">' + (row.ok ? 'PASS' : 'FAIL') + '</td><td>' + row.detail + '</td></tr>';
+  }
+  html += '</table>';
+  html += '<h2>Overall: <span class="' + (ok ? 'ok' : 'fail') + '">' + (ok ? 'ALL PASS' : 'SOME FAILED') + '</span></h2>';
+  html += '<p style="margin-top:20px;"><a href="' + getWebAppUrl_() + '">Back to app</a></p>';
+  html += '</body></html>';
+  
+  return HtmlService.createHtmlOutput(html)
+    .setTitle('Diagnostics')
+    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+}
+
+/**
+ * Include CSS/HTML partials
+ * @param {string} filename - File to include
+ * @returns {string} File content
+ */
+function include_(filename) {
+  return HtmlService.createHtmlOutputFromFile(filename).getContent();
+}

@@ -1,5 +1,5 @@
 # Prevent duplicate server-side definitions: we deploy the .js files only
-Interview-Booking-Uniform-v3-main/src/**/*.gs
+src/**/*.gs
 
 # Ignore staged merge snapshots
-Interview-Booking-Uniform-v3-main/staged-merge-*/**
+staged-merge-*/**
