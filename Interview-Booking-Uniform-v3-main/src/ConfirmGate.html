@@ -60,15 +60,13 @@
         </p>
       </div>
 
-      <!-- POST form prevents Gmail / link-scanner prefetch from consuming the token -->
-      <form method="POST" action="<?= webAppUrl ?>" style="margin: 30px 0;">
-        <input type="hidden" name="page" value="access">
-        <input type="hidden" name="token" value="<?= token ?>">
-        <input type="hidden" name="confirm" value="1">
-        <button type="submit" class="btn btn-success" style="padding: 15px 40px; font-size: 18px; width: 100%;">
+      <div style="margin: 30px 0;">
+        <a href="<?= webAppUrl ?>?page=access&token=<?= encodeURIComponent(token) ?>&confirm=1"
+           class="btn btn-success"
+           style="display:inline-block; padding: 15px 40px; font-size: 18px; width: 100%; box-sizing: border-box; text-decoration: none;">
           ✅ Continue to Schedule Interview
-        </button>
-      </form>
+        </a>
+      </div>
 
       <p style="color:#999; font-size:12px;">
         If you're not ready, you can return later using the same link — as long as it hasn't been used yet.

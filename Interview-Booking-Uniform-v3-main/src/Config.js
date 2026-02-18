@@ -121,6 +121,19 @@ function SET_WEBAPP_EXEC_URL() {
 }
 
 /**
+ * Admin fix helper to force WEB_APP_EXEC_URL and log the resolved final URL.
+ * Run manually from Apps Script editor: FIX_SET_WEB_APP_EXEC_URL()
+ * @returns {string} Final URL from getWebAppUrl_()
+ */
+function FIX_SET_WEB_APP_EXEC_URL() {
+  var props = PropertiesService.getScriptProperties();
+  props.setProperty('WEB_APP_EXEC_URL', WEB_APP_EXEC_URL_TARGET);
+  var finalUrl = getWebAppUrl_();
+  Logger.log('FIX_SET_WEB_APP_EXEC_URL -> WEB_APP_EXEC_URL: ' + finalUrl);
+  return finalUrl;
+}
+
+/**
  * Set the deploy id (the /s/<DEPLOY_ID>/ part) in script properties
  * @param {string} id - Deploy id (no slashes)
  */

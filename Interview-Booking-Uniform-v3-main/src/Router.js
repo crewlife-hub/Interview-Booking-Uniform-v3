@@ -50,6 +50,10 @@ function doGet(e) {
 
     // Route: Secure booking access (confirm gate + one-time redirect)
     if (page === 'access') {
+      // confirm=1 consumes token and redirects; otherwise show gate page only.
+      if (String(params.confirm || '') === '1') {
+        return handleSecureAccessConfirm_(params, traceId);
+      }
       return serveSecureAccess_(params, traceId);
     }
 
