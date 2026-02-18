@@ -39,6 +39,31 @@ function getFirstCharCodes_(value, maxChars) {
   return out;
 }
 
+function isCostaOrSeaChefs_(brand) {
+  var b = String(brand || '').toUpperCase().trim();
+  return b === 'COSTA' || b === 'SEACHEFS';
+}
+
+function idsEqual_(left, right) {
+  return String(left || '') === String(right || '');
+}
+
+function getPreferredColumnIdsForBrand_(brand) {
+  var out = {
+    emailColumnId: null,
+    textForEmailColumnId: null,
+    interviewLinkColumnId: null
+  };
+
+  if (!isCostaOrSeaChefs_(brand)) return out;
+
+  var b = getBrand_(brand) || {};
+  if (b.emailColumnId) out.emailColumnId = String(b.emailColumnId);
+  if (b.textForEmailColumnId) out.textForEmailColumnId = String(b.textForEmailColumnId);
+  if (b.interviewLinkColumnId) out.interviewLinkColumnId = String(b.interviewLinkColumnId);
+  return out;
+}
+
 /**
  * Search for a candidate in Smartsheet by Email + Text For Email.
  * ANY-sheet match wins: returns on the first exact match found.
@@ -136,17 +161,22 @@ function searchCandidateInSmartsheet_(brand, email, textForEmail) {
     var tfeColId           = null;
     var interviewLinkColId = null;
     var columnMap          = {};
+    var preferredColIds    = getPreferredColumnIdsForBrand_(brand);
 
     for (var i = 0; i < columns.length; i++) {
       var col = columns[i];
       var normTitle = String(col.title || '').trim().toLowerCase();
       columnMap[col.id] = col.title;
 
-      if (normTitle === 'email') emailColId = col.id;
-      if (normTitle === 'text for email') tfeColId = col.id;
+      if (preferredColIds.emailColumnId && idsEqual_(col.id, preferredColIds.emailColumnId)) emailColId = col.id;
+      if (preferredColIds.textForEmailColumnId && idsEqual_(col.id, preferredColIds.textForEmailColumnId)) tfeColId = col.id;
+      if (preferredColIds.interviewLinkColumnId && idsEqual_(col.id, preferredColIds.interviewLinkColumnId)) interviewLinkColId = col.id;
+
+      if (!emailColId && normTitle === 'email') emailColId = col.id;
+      if (!tfeColId && normTitle === 'text for email') tfeColId = col.id;
 
       // Interview link can be "Interview: Link", "Interview : Link", etc.
-      if (normTitle === 'interview link') interviewLinkColId = col.id;
+      if (!interviewLinkColId && normTitle === 'interview link') interviewLinkColId = col.id;
     }
 
     // Flexible fallback: if exact "interview link" not found, match any title containing both words
@@ -256,7 +286,7 @@ function getSmartsheetIdsForBrand_(brand) {
   var ids = [];
   if (!brand) return ids;
   var bKey = String(brand).toUpperCase().trim();
-  var isSeaChefs = bKey === 'SEACHEFS';
+  var isStrictBrand = (bKey === 'SEACHEFS' || bKey === 'COSTA');
   var props = PropertiesService.getScriptProperties();
 
   // Script property overrides: SMARTSHEET_IDS_{BRAND} (comma list) and SMARTSHEET_ID_{BRAND} (single/comma)
@@ -268,8 +298,8 @@ function getSmartsheetIdsForBrand_(brand) {
   if (propSingle) propListIds = propListIds.concat(String(propSingle).split(',').map(function(s) { return s.trim(); }).filter(function(s) { return s; }));
   if (propListIds.length > 0) ids = ids.concat(propListIds);
 
-  // Brand registry entry (SeaChefs: only use fallback when no explicit script-property IDs are configured)
-  var shouldUseBrandFallback = !(isSeaChefs && propListIds.length > 0);
+  // Brand registry entry (SEACHEFS/COSTA: only use fallback when no explicit script-property IDs are configured)
+  var shouldUseBrandFallback = !(isStrictBrand && propListIds.length > 0);
   if (shouldUseBrandFallback) {
     var b = getBrand_(brand);
     if (b && b.smartsheetId) ids = ids.concat(String(b.smartsheetId).split(',').map(function(s) { return s.trim(); }).filter(function(s) { return s; }));
@@ -344,13 +374,16 @@ function getTextForEmailOptionsForBrandApi(brand) {
         var data    = JSON.parse(response.getContentText());
         var columns = data.columns || [];
         var rows    = data.rows    || [];
+        var preferredColIds = getPreferredColumnIdsForBrand_(brand);
 
         var tfeColId = null;
         for (var i = 0; i < columns.length; i++) {
-          if (String(columns[i].title || '').trim().toLowerCase() === 'text for email') {
-            tfeColId = columns[i].id;
+          var col = columns[i];
+          if (preferredColIds.textForEmailColumnId && idsEqual_(col.id, preferredColIds.textForEmailColumnId)) {
+            tfeColId = col.id;
             break;
           }
+          if (!tfeColId && String(col.title || '').trim().toLowerCase() === 'text for email') tfeColId = col.id;
         }
         if (!tfeColId) continue;
 
@@ -546,6 +579,106 @@ function TEST_SeachefsSheetNameDiagnostics() {
   };
 
   Logger.log('SEACHEFS_SHEET_DIAG => %s', JSON.stringify(out));
+  return out;
+}
+
+/**
+ * Diagnostics: verify resolved sheet IDs and effective column IDs for COSTA/SEACHEFS.
+ * Logs brand, resolved sheet IDs + sheet names, resolved Email/Text/Interview column IDs, and options count.
+ * Run from Apps Script editor: TEST_VerifyBrandSheets()
+ * @returns {Object}
+ */
+function TEST_VerifyBrandSheets() {
+  var brands = ['COSTA', 'SEACHEFS'];
+  var cfg = getConfig_();
+  var apiToken = cfg.SMARTSHEET_API_TOKEN;
+  var out = {};
+
+  if (!apiToken) return { ok: false, error: 'Smartsheet API token not configured', code: 'NO_API_TOKEN' };
+
+  for (var i = 0; i < brands.length; i++) {
+    var brand = brands[i];
+    var ids = getSmartsheetIdsForBrand_(brand);
+    var preferred = getPreferredColumnIdsForBrand_(brand);
+    var sheets = [];
+
+    for (var s = 0; s < ids.length; s++) {
+      var sheetId = ids[s];
+      var sheetInfo = {
+        sheetId: String(sheetId),
+        sheetName: '',
+        status: 'UNKNOWN',
+        resolvedColumnIds: {
+          emailColumnId: preferred.emailColumnId || null,
+          textForEmailColumnId: preferred.textForEmailColumnId || null,
+          interviewLinkColumnId: preferred.interviewLinkColumnId || null
+        }
+      };
+
+      try {
+        var response = UrlFetchApp.fetch(
+          SMARTSHEET_API_BASE + '/sheets/' + sheetId + '?pageSize=1',
+          {
+            method: 'get',
+            headers: { 'Authorization': 'Bearer ' + apiToken, 'Content-Type': 'application/json' },
+            muteHttpExceptions: true
+          }
+        );
+        var code = response.getResponseCode();
+        if (code === 200) {
+          var data = JSON.parse(response.getContentText());
+          var columns = data.columns || [];
+          sheetInfo.sheetName = String(data.name || '');
+          sheetInfo.status = 'OK';
+
+          if (!sheetInfo.resolvedColumnIds.emailColumnId) {
+            for (var c1 = 0; c1 < columns.length; c1++) {
+              if (String(columns[c1].title || '').trim().toLowerCase() === 'email') {
+                sheetInfo.resolvedColumnIds.emailColumnId = String(columns[c1].id);
+                break;
+              }
+            }
+          }
+          if (!sheetInfo.resolvedColumnIds.textForEmailColumnId) {
+            for (var c2 = 0; c2 < columns.length; c2++) {
+              if (String(columns[c2].title || '').trim().toLowerCase() === 'text for email') {
+                sheetInfo.resolvedColumnIds.textForEmailColumnId = String(columns[c2].id);
+                break;
+              }
+            }
+          }
+          if (!sheetInfo.resolvedColumnIds.interviewLinkColumnId) {
+            for (var c3 = 0; c3 < columns.length; c3++) {
+              var t = String(columns[c3].title || '').trim().toLowerCase();
+              if (t.indexOf('interview') !== -1 && t.indexOf('link') !== -1) {
+                sheetInfo.resolvedColumnIds.interviewLinkColumnId = String(columns[c3].id);
+                break;
+              }
+            }
+          }
+        } else {
+          sheetInfo.status = 'HTTP_' + code;
+        }
+      } catch (e) {
+        sheetInfo.status = 'ERROR';
+        sheetInfo.error = String(e);
+      }
+
+      sheets.push(sheetInfo);
+    }
+
+    var options = getTextForEmailOptionsForBrandApi(brand);
+
+    out[brand] = {
+      brand: brand,
+      resolvedSheetIds: ids,
+      sheets: sheets,
+      optionsCount: options.length
+    };
+
+    Logger.log('VERIFY_BRAND_SHEETS %s => %s', brand, JSON.stringify(out[brand]));
+  }
+
   return out;
 }
 

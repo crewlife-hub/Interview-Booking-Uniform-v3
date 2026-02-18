@@ -26,6 +26,8 @@ var BRANDS = {
     smartsheetId: '1944430555647876',
     emailColumnId: '2945074574610308',
     textForEmailColumnId: '6041299318427524',
+    interviewLinkColumnId: '7167199225270148',
+    fullNameColumnId: '3789499504742276',
     emailColumn: 'Email',
     textForEmailColumn: 'Text For Email',
     featureFlags: {
@@ -39,6 +41,8 @@ var BRANDS = {
     smartsheetId: '8560707416051588',
     emailColumnId: '2951912162545540',
     textForEmailColumnId: '6048136906362756',
+    interviewLinkColumnId: '7174036813205380',
+    fullNameColumnId: '3796337092677508',
     emailColumn: 'Email',
     textForEmailColumn: 'Text For Email',
     featureFlags: {
