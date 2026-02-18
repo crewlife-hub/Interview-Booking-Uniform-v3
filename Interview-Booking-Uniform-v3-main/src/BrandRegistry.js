@@ -10,7 +10,9 @@ var BRANDS = {
   ROYAL: {
     name: 'Royal Caribbean',
     code: 'ROYAL',
-    smartsheetId: 'PLACEHOLDER_ROYAL_SMARTSHEET_ID', // ← REPLACE WITH ACTUAL ID
+    smartsheetId: '118517627047812',
+    emailColumnId: '8026953069842308',
+    textForEmailColumnId: '1126793421213572',
     emailColumn: 'Email',
     textForEmailColumn: 'Text For Email',
     featureFlags: {
@@ -21,7 +23,9 @@ var BRANDS = {
   COSTA: {
     name: 'Costa Cruises',
     code: 'COSTA',
-    smartsheetId: 'PLACEHOLDER_COSTA_SMARTSHEET_ID', // ← REPLACE WITH ACTUAL ID
+    smartsheetId: '1944430555647876',
+    emailColumnId: '2945074574610308',
+    textForEmailColumnId: '6041299318427524',
     emailColumn: 'Email',
     textForEmailColumn: 'Text For Email',
     featureFlags: {
@@ -32,7 +36,9 @@ var BRANDS = {
   SEACHEFS: {
     name: 'Seachefs',
     code: 'SEACHEFS',
-    smartsheetId: 'PLACEHOLDER_SEACHEFS_SMARTSHEET_ID', // ← REPLACE WITH ACTUAL ID
+    smartsheetId: '8560707416051588',
+    emailColumnId: '2951912162545540',
+    textForEmailColumnId: '6048136906362756',
     emailColumn: 'Email',
     textForEmailColumn: 'Text For Email',
     featureFlags: {
