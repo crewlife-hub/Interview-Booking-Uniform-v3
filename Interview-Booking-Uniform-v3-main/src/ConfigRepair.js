@@ -114,3 +114,21 @@ function FIX_ConfigSheetSchema(dryRun) {
   Logger.log(report.join('\n'));
   return { ok: true, dryRun: dryRun, report: report };
 }
+
+/**
+ * Convenience runner for dry-run mode from Apps Script editor Run menu.
+ */
+function RUN_FIX_ConfigSheetSchema_DryRun() {
+  var result = FIX_ConfigSheetSchema(true);
+  Logger.log('DRY RUN RESULT: ' + JSON.stringify(result));
+  return result;
+}
+
+/**
+ * Convenience runner for apply mode from Apps Script editor Run menu.
+ */
+function RUN_FIX_ConfigSheetSchema_Apply() {
+  var result = FIX_ConfigSheetSchema(false);
+  Logger.log('APPLY RESULT: ' + JSON.stringify(result));
+  return result;
+}
