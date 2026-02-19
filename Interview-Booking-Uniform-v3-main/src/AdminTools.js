@@ -143,5 +143,52 @@ function runDiagOnce() {
     Logger.log('runDiagOnce: error=%s', String(e));
     return { ok: false, error: String(e) };
   }
+}
 
+/**
+ * INSTALL TIME-BASED TRIGGER for processSidewaysInvites_
+ * ---------------------------------------------------------------------------
+ * Run this function ONCE from the Apps Script editor to create the trigger.
+ * It will fire every 5 minutes, scan all brand Smartsheets for rows where
+ * "SEND Interview Invite" = "Sideways", send the token-gated booking email,
+ * and mark the row "🔔Sent".
+ *
+ * Safe to run multiple times — removes any duplicate triggers first.
+ */
+function installProcessSidewaysTrigger() {
+  // Remove any existing triggers for this function to avoid duplicates
+  var existing = ScriptApp.getProjectTriggers();
+  for (var i = 0; i < existing.length; i++) {
+    if (existing[i].getHandlerFunction() === 'processSidewaysInvites_') {
+      ScriptApp.deleteTrigger(existing[i]);
+      Logger.log('Removed existing trigger: ' + existing[i].getUniqueId());
+    }
+  }
+
+  // Create new every-5-minute trigger
+  var trigger = ScriptApp.newTrigger('processSidewaysInvites_')
+    .timeBased()
+    .everyMinutes(5)
+    .create();
+
+  Logger.log('✅ Trigger installed: processSidewaysInvites_ every 5 minutes (ID: ' + trigger.getUniqueId() + ')');
+  Logger.log('Go to Triggers page in Apps Script to confirm.');
+  return { ok: true, triggerId: trigger.getUniqueId(), interval: '5 minutes' };
+}
+
+/**
+ * REMOVE the time-based trigger for processSidewaysInvites_
+ * Run this if you want to pause the automated sending.
+ */
+function removeProcessSidewaysTrigger() {
+  var existing = ScriptApp.getProjectTriggers();
+  var removed = 0;
+  for (var i = 0; i < existing.length; i++) {
+    if (existing[i].getHandlerFunction() === 'processSidewaysInvites_') {
+      ScriptApp.deleteTrigger(existing[i]);
+      removed++;
+    }
+  }
+  Logger.log('Removed ' + removed + ' trigger(s) for processSidewaysInvites_');
+  return { ok: true, removed: removed };
 }

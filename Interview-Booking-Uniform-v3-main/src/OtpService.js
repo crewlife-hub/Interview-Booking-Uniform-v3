@@ -486,6 +486,7 @@ function sendBookingConfirmEmail_(params) {
   var token = String(params.token || '').trim();
   var bookingUrl = String(params.bookingUrl || '').trim();
   var candidateName = String(params.candidateName || '').trim() || 'Candidate';
+  var position = String(params.position || params.textForEmail || '').trim();
   var traceId = params.traceId || generateTraceId_();
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -586,6 +587,7 @@ function sendBookingConfirmEmail_(params) {
   htmlBody.brandName = brandName;
   htmlBody.textForEmail = textForEmail;
   htmlBody.candidateName = candidateName;
+  htmlBody.position = position;
   htmlBody.gateUrl = accessUrl;
   htmlBody.accessUrl = accessUrl;
   
