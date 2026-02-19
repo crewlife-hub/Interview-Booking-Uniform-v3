@@ -113,6 +113,17 @@ function doPost(e) {
       return handleGenerateSignedUrl_(params, traceId);
     }
 
+    // Route: Run Sideways invites worker (POST)
+    // This processes Smartsheet rows with SEND Interview Invite = "Sideways"
+    if (action === 'processsideways') {
+      var dry = params.dryRun === 'true' || params.dryRun === true;
+      var testEmail = params.testEmail || null;
+      var brand = params.brand || null;
+      var limit = params.limit ? Number(params.limit) : undefined;
+      var res = processSidewaysInvites_({ dryRun: dry, testEmail: testEmail, brand: brand, limit: limit });
+      return jsonResponse_(res);
+    }
+
     // Route: Secure booking access confirmation (POST from confirm gate)
     if (page === 'access') {
       return handleSecureAccessConfirm_(params, traceId);
