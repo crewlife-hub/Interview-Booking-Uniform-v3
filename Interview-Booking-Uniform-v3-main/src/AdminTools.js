@@ -192,3 +192,46 @@ function removeProcessSidewaysTrigger() {
   Logger.log('Removed ' + removed + ' trigger(s) for processSidewaysInvites_');
   return { ok: true, removed: removed };
 }
+
+/**
+ * MANUAL RUNNER: Process Sideways for a single brand (for testing)
+ *
+ * Defaults to dry-run mode (sends to testEmail) to avoid spamming candidates.
+ *
+ * @param {string} brand - e.g. ROYAL, COSTA, SEACHEFS
+ * @param {Object=} opts
+ * @param {boolean=} opts.dryRun - default true
+ * @param {string=} opts.testEmail - default info@crewlifeatsea.com (when dryRun)
+ * @param {number=} opts.limit - default 200
+ * @returns {Object} worker result
+ */
+function runSidewaysForBrand(brand, opts) {
+  opts = opts || {};
+
+  var b = String(brand || '').toUpperCase().trim();
+  if (!b) return { ok: false, error: 'brand is required (e.g. ROYAL)' };
+
+  var dryRun = (opts.dryRun === undefined) ? true : !!opts.dryRun;
+  var testEmail = opts.testEmail || null;
+  var limit = (opts.limit === undefined) ? 200 : Number(opts.limit);
+
+  if (dryRun && !testEmail) testEmail = 'info@crewlifeatsea.com';
+
+  Logger.log('runSidewaysForBrand: brand=%s dryRun=%s testEmail=%s limit=%s', b, dryRun, testEmail || '(none)', limit);
+  var res = processSidewaysInvites_({ brand: b, dryRun: dryRun, testEmail: testEmail, limit: limit });
+  Logger.log('runSidewaysForBrand: result=%s', JSON.stringify(res));
+  return res;
+}
+
+// Convenience helpers for quick testing from the Apps Script UI
+function runSideways_ROYAL() {
+  return runSidewaysForBrand('ROYAL', { dryRun: true, testEmail: 'info@crewlifeatsea.com' });
+}
+
+function runSideways_COSTA() {
+  return runSidewaysForBrand('COSTA', { dryRun: true, testEmail: 'info@crewlifeatsea.com' });
+}
+
+function runSideways_SEACHEFS() {
+  return runSidewaysForBrand('SEACHEFS', { dryRun: true, testEmail: 'info@crewlifeatsea.com' });
+}
