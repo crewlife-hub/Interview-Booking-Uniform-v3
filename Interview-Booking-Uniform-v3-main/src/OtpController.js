@@ -392,6 +392,7 @@ function handleOtpVerify_(params, traceId) {
   var emailResult;
   try {
     emailResult = sendBookingConfirmEmail_({
+      candidateName: (candidate && candidate.candidate && candidate.candidate['Name']) ? candidate.candidate['Name'].split(' ')[0] : '',
       email:        email,
       brand:        brand,
       textForEmail: result.textForEmail || textForEmail,

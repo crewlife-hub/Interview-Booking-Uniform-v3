@@ -7,62 +7,92 @@
 </head>
 <body style="margin: 0; padding: 0; font-family: Arial, sans-serif; background: #f5f5f5;">
   <div style="max-width: 600px; margin: 0 auto; background: #fff;">
-    
+
     <!-- Header Banner -->
-    <div style="background: linear-gradient(135deg, #1a237e, #0d47a1); padding: 20px; text-align: center;">
-      <div style="color: rgba(255,255,255,0.9); font-size: 14px;">
-        CREW LIFE 🚢 AT SEA | CANDIDATES
-      </div>
+    <div style="background: linear-gradient(135deg, #1a237e, #0d47a1); padding: 24px 20px; text-align: center;">
+      <img src="https://i.imgur.com/YpSfaNQ.png" alt="Crew Life at Sea" style="height: 54px; margin-bottom: 6px;">
     </div>
-    
+
     <!-- Main Content -->
     <div style="padding: 30px;">
-      <h1 style="text-align: center; color: #333; font-size: 24px; margin: 0 0 20px 0;">
-        🎉 Congratulations! You're Almost There
+      <h1 style="text-align: center; color: #333; font-size: 24px; margin: 0 0 10px 0;">
+        🎉 <strong>Congratulations, <?= candidateName ?>!</strong>
       </h1>
-      
-      <p style="text-align: center; font-size: 16px; color: #666; margin: 0 0 10px 0;">
-        We've successfully verified your passcode.
+
+      <p style="text-align: center; font-size: 15px; color: #555; margin: 0 0 8px 0;">
+        Congratulations on progressing to the next phase of our hiring journey!
       </p>
-      
-      <p style="text-align: center; font-size: 16px; color: #333; margin: 0 0 25px 0;">
-        Please schedule your interview for the <strong><?= textForEmail ?></strong> department.
+
+      <p style="font-size: 15px; color: #444; line-height: 1.6; margin: 0 0 10px 0;">
+        You've taken another important step toward joining the Crew Life at Sea family, and we're genuinely excited about the skills you could bring on board.
       </p>
-      
-      <!-- CTA Button -->
-      <div style="text-align: center; margin: 30px 0;">
-        <a href="<?= gateUrl || accessUrl ?>" 
-           style="display: inline-block; background: #28a745; color: white; padding: 16px 40px; text-decoration: none; border-radius: 8px; font-size: 18px; font-weight: bold;">
-          Schedule Your Interview
-        </a>
-      </div>
-      
-      <!-- Warning Box -->
-      <div style="background: #fff3cd; border: 1px solid #ffc107; border-radius: 8px; padding: 15px; margin: 25px 0;">
-        <p style="color: #856404; margin: 0; text-align: center;">
-          Please note: This link is valid for <strong>10 minutes</strong> and can only be used once.
+
+      <p style="font-size: 15px; color: #444; margin: 0 0 10px 0;">
+        You've reached the interview stage for the position of <strong><?= textForEmail ?></strong>.
+      </p>
+
+      <p style="font-size: 15px; color: #444; margin: 0 0 20px 0;">
+        Please review the details below and follow the instructions carefully to secure your slot.
+      </p>
+
+      <!-- Must-Select Warning -->
+      <div style="background: #fff3cd; border: 2px solid #ffc107; border-radius: 8px; padding: 15px; text-align: center; margin: 20px 0;">
+        <p style="color: #856404; font-size: 16px; margin: 0; font-weight: bold;">
+          ⚠️ MUST SELECT THE OPTION BELOW ⚠️
+        </p>
+        <p style="color: #856404; margin: 5px 0 0 0; font-size: 14px;">
+          Make sure to select this when booking your interview !!!
         </p>
       </div>
-      
+
+      <!-- Text For Email Badge -->
+      <div style="background: #0d6efd; border-radius: 8px; padding: 18px; text-align: center; margin: 20px 0;">
+        <span style="color: white; font-size: 20px; font-weight: bold;">📌 <?= textForEmail ?> 📌</span>
+      </div>
+
+      <!-- Link Notice -->
+      <p style="font-size: 14px; color: #666; margin: 18px 0 10px 0;">
+        <strong>Please note:</strong> This link is valid for <strong>10 minutes</strong> and can only be used once.
+      </p>
+
       <p style="font-size: 16px; color: #333; margin: 20px 0 10px 0;">
         <strong>Make sure you're ready:</strong>
       </p>
-      
-      <ul style="margin: 0; padding-left: 25px;">
+
+      <ul style="margin: 0 0 10px 0; padding-left: 25px;">
         <li style="color: #28a745; padding: 5px 0;">✅ Be online at least 10 minutes early</li>
         <li style="color: #28a745; padding: 5px 0;">✅ Test your connection and camera (if online)</li>
         <li style="color: #28a745; padding: 5px 0;">✅ Dress professionally</li>
         <li style="color: #28a745; padding: 5px 0;">✅ Have your CV and any required documents ready</li>
       </ul>
-      
+
+      <!-- CTA Button — ALWAYS uses canonical gate URL, never a calendar link -->
+      <div style="text-align: center; margin: 30px 0;">
+        <a href="<?= gateUrl || accessUrl ?>"
+           style="display: inline-block; background: #1a237e; color: white; padding: 16px 40px; text-decoration: none; border-radius: 8px; font-size: 18px; font-weight: bold;">
+          Book Your Interview
+        </a>
+      </div>
+
       <hr style="border: none; border-top: 1px solid #eee; margin: 30px 0;">
-      
+
       <p style="text-align: center; color: #666; font-size: 14px;">
         Best regards,<br>
         <strong>Crew Life at Sea Recruitment Team</strong>
       </p>
+
+      <!-- Footer -->
+      <div style="padding: 20px 10px; text-align: center; color: #999; font-size: 12px;">
+        <p style="margin: 8px 0 4px 0;">Crew Life at Sea &bull; Bringing seafarers and opportunities together</p>
+        <p style="margin: 4px 0;">
+          <a href="https://crewlifeatsea.com" style="color: #0d6efd; text-decoration: none;">Website</a> &bull;
+          <a href="mailto:recruitment@crewlifeatsea.com" style="color: #0d6efd; text-decoration: none;">Contact</a> &bull;
+          <a href="https://www.linkedin.com/company/crew-life-at-sea" style="color: #0d6efd; text-decoration: none;">LinkedIn</a>
+        </p>
+        <p style="margin: 8px 0 0 0; font-size: 11px; color: #bbb;">&copy; Crew Life at Sea. All rights reserved.</p>
+      </div>
     </div>
-    
+
   </div>
 </body>
 </html>
