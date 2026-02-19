@@ -8,22 +8,48 @@ var APP_VERSION = '1.0.0';
 var CONFIG_SHEET_ID = '1qM3ZEdBsvbEofDH8DayRWcRa4bUcrKQIv8kzKSYZ1AM';
 // Default exec URL — replaceable via Script Properties `WEB_APP_EXEC_URL` or `DEPLOY_ID`
 var WEB_APP_EXEC_URL_DEFAULT = 'https://script.google.com/macros/s/AKfycbzL1GZHA4DoMNhDT5-6LuYlXw2YPyYZI444dJFOHvrUtPXZorO4P7Sx1i8-Qe1bKKmxPQ/exec';
-var WEB_APP_EXEC_URL_TARGET = 'https://script.google.com/a/macros/seainfogroup.com/s/AKfycbwglbdo_kqxQGcucUPKvWNhvw8UmZOJBFLdf8Gj3UWVLHjPjlHZniH3H7mJ25JRK0ziFg/exec';
+var WEB_APP_EXEC_URL_TARGET = 'https://script.google.com/a/macros/seainfogroup.com/s/AKfycbzOoN7GTv1DhDR18SXPtJSsF3CX6Vx3iWY5xz4f5nLKtw2xXmer7jlYwFPXzmlc-F3SQQ/exec';
 
 /**
  * CANONICAL web app URL used for ALL email CTAs.
  * This MUST be the token-gate entry point — never a calendar URL.
  * Email CTA helpers call this instead of getWebAppUrl_() to guarantee
  * the link is always the correct /exec endpoint regardless of script properties.
+ * Deployment @99 - Feb 19 2026 - contains all CTA fixes.
  */
-var CANONICAL_WEB_APP_URL = 'https://script.google.com/a/macros/seainfogroup.com/s/AKfycbwglbdo_kqxQGcucUPKvWNhvw8UmZOJBFLdf8Gj3UWVLHjPjlHZniH3H7mJ25JRK0ziFg/exec';
+var CANONICAL_WEB_APP_URL = 'https://script.google.com/a/macros/seainfogroup.com/s/AKfycbzOoN7GTv1DhDR18SXPtJSsF3CX6Vx3iWY5xz4f5nLKtw2xXmer7jlYwFPXzmlc-F3SQQ/exec';
 
 /**
  * Return the canonical web app base URL for email CTAs.
- * Always returns the hardcoded CANONICAL_WEB_APP_URL.
+ * Uses ScriptApp.getService().getUrl() to always return the URL of 
+ * the CURRENTLY EXECUTING deployment - no hardcoding needed.
+ * Falls back to WEB_APP_EXEC_URL script property or CANONICAL_WEB_APP_URL constant.
  * @returns {string}
  */
 function getEmailCtaBaseUrl_() {
+  try {
+    // Best: use the URL of the currently executing deployment
+    var url = ScriptApp.getService().getUrl();
+    if (url && url.indexOf('/exec') !== -1) {
+      Logger.log('[getEmailCtaBaseUrl_] Using ScriptApp URL: ' + url);
+      return url;
+    }
+  } catch (e) {
+    Logger.log('[getEmailCtaBaseUrl_] ScriptApp.getService().getUrl() failed: ' + e);
+  }
+  
+  // Fallback: script property
+  try {
+    var props = PropertiesService.getScriptProperties();
+    var propUrl = props.getProperty('WEB_APP_EXEC_URL');
+    if (propUrl) {
+      Logger.log('[getEmailCtaBaseUrl_] Using WEB_APP_EXEC_URL property: ' + propUrl);
+      return propUrl;
+    }
+  } catch (e) {}
+  
+  // Last resort: hardcoded constant
+  Logger.log('[getEmailCtaBaseUrl_] Using CANONICAL_WEB_APP_URL constant');
   return CANONICAL_WEB_APP_URL;
 }
 
