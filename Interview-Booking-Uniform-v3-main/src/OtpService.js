@@ -488,8 +488,16 @@ function sendBookingConfirmEmail_(params) {
   var candidateName = String(params.candidateName || '').trim() || 'Candidate';
   var traceId = params.traceId || generateTraceId_();
 
-  // ── CANONICAL CTA BASE — never use getWebAppUrl_() for email links ──
-  var ctaBase = getEmailCtaBaseUrl_();
+  // ═══════════════════════════════════════════════════════════════════════════
+  // HARDCODED CTA BASE - DO NOT CHANGE - THIS IS THE ONLY URL ALLOWED IN EMAILS
+  // ═══════════════════════════════════════════════════════════════════════════
+  var HARDCODED_CTA_BASE = 'https://script.google.com/a/macros/seainfogroup.com/s/AKfycbx-IEEieMEvXPf0cXC_R_y6KKtWOMkA2nXJkU1mu8XlIMY7MnCn5eamrzjzvre0frZm0Q/exec';
+  
+  Logger.log('███ sendBookingConfirmEmail_ CALLED ███');
+  Logger.log('███ HARDCODED_CTA_BASE: ' + HARDCODED_CTA_BASE);
+  Logger.log('███ Input bookingUrl: ' + (bookingUrl ? bookingUrl.substring(0, 80) : 'NONE'));
+  Logger.log('███ Input accessUrl: ' + (accessUrl ? accessUrl.substring(0, 80) : 'NONE'));
+  Logger.log('███ Input token: ' + (token ? token.substring(0, 20) + '...' : 'NONE'));
 
   // If caller passes accessUrl only, extract token so we can rebuild canonical gate URL.
   if (!token && accessUrl) {
@@ -497,11 +505,14 @@ function sendBookingConfirmEmail_(params) {
       var tokenMatch = accessUrl.match(/[?&]token=([^&]+)/i);
       if (tokenMatch && tokenMatch[1]) {
         token = decodeURIComponent(tokenMatch[1]);
+        Logger.log('███ Extracted token from accessUrl: ' + token.substring(0, 20) + '...');
       }
     } catch (e) {}
   }
 
+  // If no token but we have bookingUrl (calendar URL), issue a new token
   if (!token && bookingUrl) {
+    Logger.log('███ Issuing new token for bookingUrl...');
     var issued = issueVerifiedAccessTokenForBooking_({
       email: email,
       brand: brand,
@@ -510,25 +521,43 @@ function sendBookingConfirmEmail_(params) {
       traceId: traceId
     });
     if (!issued.ok) {
-      Logger.log('[sendBookingConfirmEmail_] Failed to issue access token from bookingUrl: %s', issued.error || 'unknown');
+      Logger.log('███ FAILED to issue token: ' + (issued.error || 'unknown'));
       return { ok: false, error: issued.error || 'Failed to create secure access link' };
     }
     token = issued.token;
+    Logger.log('███ Issued new token: ' + token.substring(0, 20) + '...');
   }
 
-  // Canonicalize CTA URL: ALWAYS use hardcoded canonical web app URL + token.
+  // ═══════════════════════════════════════════════════════════════════════════
+  // BUILD THE CTA URL - ALWAYS USE HARDCODED BASE + TOKEN - NEVER CALENDAR URL
+  // ═══════════════════════════════════════════════════════════════════════════
   if (token) {
-    accessUrl = ctaBase + '?page=access&token=' + encodeURIComponent(token);
+    accessUrl = HARDCODED_CTA_BASE + '?page=access&token=' + encodeURIComponent(token);
+    Logger.log('███ Built accessUrl from HARDCODED base: ' + accessUrl.substring(0, 100));
   }
 
-  // ── Diagnostic log ──
+  // ═══════════════════════════════════════════════════════════════════════════
+  // VALIDATION - BLOCK ANY EMAIL WITH CALENDAR URL - THIS MUST NEVER PASS
+  // ═══════════════════════════════════════════════════════════════════════════
   var isCalendar = accessUrl.indexOf('calendar.google.com') !== -1;
+  Logger.log('███ Final accessUrl isCalendar: ' + isCalendar);
+  Logger.log('███ Final accessUrl: ' + accessUrl);
+  
+  if (isCalendar) {
+    Logger.log('███ BLOCKED - Calendar URL detected in CTA! Email NOT sent.');
+    return { ok: false, error: 'BLOCKED: Calendar URL in CTA - contact admin' };
+  }
+  
+  if (accessUrl.indexOf(HARDCODED_CTA_BASE) !== 0) {
+    Logger.log('███ BLOCKED - CTA does not start with hardcoded base! Email NOT sent.');
+    return { ok: false, error: 'BLOCKED: CTA must use hardcoded web app URL' };
+  }
+  
   logEvent_(traceId, brand, email, 'BOOKING_EMAIL_CTA_BUILT', {
-    ctaBase: ctaBase,
+    ctaBase: HARDCODED_CTA_BASE,
     isCalendar: isCalendar,
     hasToken: !!token
   });
-  Logger.log('BOOKING_EMAIL_CTA_BUILT: ' + JSON.stringify({ brand: brand, ctaBase: ctaBase, isCalendar: isCalendar }));
 
   // Input validation
   if (!email || email.indexOf('@') === -1) {
@@ -538,15 +567,6 @@ function sendBookingConfirmEmail_(params) {
   if (!accessUrl) {
     Logger.log('[sendBookingConfirmEmail_] Missing access URL');
     return { ok: false, error: 'Missing access URL - cannot send email without link' };
-  }
-  // Reject any CTA that contains a calendar URL — must be our web app
-  if (accessUrl.indexOf('calendar.google.com') !== -1) {
-    Logger.log('[sendBookingConfirmEmail_] BLOCKED calendar URL in CTA: %s', maskUrl_(accessUrl));
-    return { ok: false, error: 'Email CTA must not contain calendar URL' };
-  }
-  if (accessUrl.indexOf(ctaBase) !== 0) {
-    Logger.log('[sendBookingConfirmEmail_] Rejected non-canonical CTA: %s', maskUrl_(accessUrl));
-    return { ok: false, error: 'Access link must route through canonical web app URL' };
   }
   
   var brandInfo = getBrand_(brand);
