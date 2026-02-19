@@ -11,6 +11,23 @@ var WEB_APP_EXEC_URL_DEFAULT = 'https://script.google.com/macros/s/AKfycbzL1GZHA
 var WEB_APP_EXEC_URL_TARGET = 'https://script.google.com/a/macros/seainfogroup.com/s/AKfycbwglbdo_kqxQGcucUPKvWNhvw8UmZOJBFLdf8Gj3UWVLHjPjlHZniH3H7mJ25JRK0ziFg/exec';
 
 /**
+ * CANONICAL web app URL used for ALL email CTAs.
+ * This MUST be the token-gate entry point — never a calendar URL.
+ * Email CTA helpers call this instead of getWebAppUrl_() to guarantee
+ * the link is always the correct /exec endpoint regardless of script properties.
+ */
+var CANONICAL_WEB_APP_URL = 'https://script.google.com/a/macros/seainfogroup.com/s/AKfycbwglbdo_kqxQGcucUPKvWNhvw8UmZOJBFLdf8Gj3UWVLHjPjlHZniH3H7mJ25JRK0ziFg/exec';
+
+/**
+ * Return the canonical web app base URL for email CTAs.
+ * Always returns the hardcoded CANONICAL_WEB_APP_URL.
+ * @returns {string}
+ */
+function getEmailCtaBaseUrl_() {
+  return CANONICAL_WEB_APP_URL;
+}
+
+/**
  * Get all configuration values
  * @returns {Object} Configuration object
  */

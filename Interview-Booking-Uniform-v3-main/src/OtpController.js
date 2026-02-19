@@ -380,8 +380,8 @@ function handleOtpVerify_(params, traceId) {
     return { ok: true, verified: true, error: 'Could not resolve booking URL. Please contact your recruiter.', textForEmail: result.textForEmail, diag: diag };
   }
 
-  // The access URL points to the confirm gate — the actual calendar URL is never sent to the client
-  var accessUrl = getWebAppUrl_() + '?page=access&token=' + encodeURIComponent(token);
+  // The access URL points to the confirm gate — use CANONICAL URL, never a calendar link
+  var accessUrl = getEmailCtaBaseUrl_() + '?page=access&token=' + encodeURIComponent(token);
 
   logStep('ACCESS_URL_GENERATED', { accessUrl: maskUrl_(accessUrl) });
   logEvent_(traceId, brand, email, 'ACCESS_URL_GENERATED', {

@@ -486,7 +486,9 @@ function sendBookingConfirmEmail_(params) {
   var token = String(params.token || '').trim();
   var bookingUrl = String(params.bookingUrl || '').trim();
   var traceId = params.traceId || generateTraceId_();
-  var webAppUrl = getWebAppUrl_();
+
+  // ── CANONICAL CTA BASE — never use getWebAppUrl_() for email links ──
+  var ctaBase = getEmailCtaBaseUrl_();
 
   // If caller passes accessUrl only, extract token so we can rebuild canonical gate URL.
   if (!token && accessUrl) {
@@ -498,7 +500,7 @@ function sendBookingConfirmEmail_(params) {
     } catch (e) {}
   }
 
-  if (!accessUrl && !token && bookingUrl) {
+  if (!token && bookingUrl) {
     var issued = issueVerifiedAccessTokenForBooking_({
       email: email,
       brand: brand,
@@ -513,11 +515,20 @@ function sendBookingConfirmEmail_(params) {
     token = issued.token;
   }
 
-  // Canonicalize CTA URL: always use web app gate URL derived from token.
+  // Canonicalize CTA URL: ALWAYS use hardcoded canonical web app URL + token.
   if (token) {
-    accessUrl = webAppUrl + '?page=access&token=' + encodeURIComponent(token);
+    accessUrl = ctaBase + '?page=access&token=' + encodeURIComponent(token);
   }
-  
+
+  // ── Diagnostic log ──
+  var isCalendar = accessUrl.indexOf('calendar.google.com') !== -1;
+  logEvent_(traceId, brand, email, 'BOOKING_EMAIL_CTA_BUILT', {
+    ctaBase: ctaBase,
+    isCalendar: isCalendar,
+    hasToken: !!token
+  });
+  Logger.log('BOOKING_EMAIL_CTA_BUILT: ' + JSON.stringify({ brand: brand, ctaBase: ctaBase, isCalendar: isCalendar }));
+
   // Input validation
   if (!email || email.indexOf('@') === -1) {
     Logger.log('[sendBookingConfirmEmail_] Invalid email');
@@ -527,9 +538,14 @@ function sendBookingConfirmEmail_(params) {
     Logger.log('[sendBookingConfirmEmail_] Missing access URL');
     return { ok: false, error: 'Missing access URL - cannot send email without link' };
   }
-  if (webAppUrl && accessUrl.indexOf(webAppUrl) !== 0) {
-    Logger.log('[sendBookingConfirmEmail_] Rejected non-webapp access URL: %s', maskUrl_(accessUrl));
-    return { ok: false, error: 'Access link must route through web app URL' };
+  // Reject any CTA that contains a calendar URL — must be our web app
+  if (accessUrl.indexOf('calendar.google.com') !== -1) {
+    Logger.log('[sendBookingConfirmEmail_] BLOCKED calendar URL in CTA: %s', maskUrl_(accessUrl));
+    return { ok: false, error: 'Email CTA must not contain calendar URL' };
+  }
+  if (accessUrl.indexOf(ctaBase) !== 0) {
+    Logger.log('[sendBookingConfirmEmail_] Rejected non-canonical CTA: %s', maskUrl_(accessUrl));
+    return { ok: false, error: 'Access link must route through canonical web app URL' };
   }
   
   var brandInfo = getBrand_(brand);
