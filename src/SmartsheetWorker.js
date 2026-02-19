@@ -13,10 +13,8 @@ function processSidewaysInvites_(opts) {
   opts = opts || {};
   var dryRun = !!opts.dryRun;
   var testEmail = opts.testEmail || 'info@crewlifeatsea.com';
-  // By default, do not update Smartsheet in dryRun. Allow override for testing.
-  var updateSheet = (opts.updateSheet === undefined || opts.updateSheet === null)
-    ? (!dryRun)
-    : !!opts.updateSheet;
+  // Never update Smartsheet in dryRun.
+  var updateSheet = !dryRun && ((opts.updateSheet === undefined || opts.updateSheet === null) ? true : !!opts.updateSheet);
   // Limit is optional. When omitted, we do not cap processing.
   // Note: Apps Script runtime/quota may still impose practical limits.
   var limit = (opts.limit === undefined || opts.limit === null || opts.limit === '')
@@ -46,6 +44,7 @@ function processSidewaysInvites_(opts) {
         logEvent_(traceId, brand, '', 'SIDEWAYS_NO_SHEETS', {});
         continue;
       }
+      logEvent_(traceId, brand, '', 'SIDEWAYS_BRAND_SHEETS', { sheetIds: sheetIds, sheetCount: sheetIds.length });
 
       for (var s = 0; s < sheetIds.length; s++) {
         var sheetId = sheetIds[s];
@@ -59,6 +58,8 @@ function processSidewaysInvites_(opts) {
 
         var columns = sheetData.columns; // array of {id,title,...}
         var rows = sheetData.rows || [];
+  var sheetName = String(sheetData.name || '');
+  Logger.log('[SIDEWAYS_SHEET] brand=' + brand + ' sheetId=' + sheetId + ' sheetName="' + sheetName + '" rows=' + rows.length);
         var colTitleToId = {};
         var colIdToTitle = {};
         for (var i = 0; i < columns.length; i++) {
@@ -132,8 +133,19 @@ function processSidewaysInvites_(opts) {
         var interviewLinkCol = linkRes ? linkRes.title : null;
 
         // Date Sent column
-        var dateRes = resolveCol_('dateSentColumnId', ['Date Sent', 'DATE SENT']);
+        var dateRes = resolveCol_('dateSentColumnId', ['Date Sent', 'DATE SENT', 'DATE_SENT']);
+        if (!dateRes) {
+          for (var di = 0; di < columns.length; di++) {
+            var dt = String(columns[di].title || '');
+            var normalized = dt.toLowerCase().replace(/[^a-z0-9]/g, '');
+            if (normalized === 'datesent') {
+              dateRes = { id: columns[di].id, title: columns[di].title };
+              break;
+            }
+          }
+        }
         var dateSentCol = dateRes ? dateRes.title : null;
+        var dateSentColId = dateRes ? dateRes.id : null;
 
         // Position Link column
         var posRes = resolveCol_('positionLinkColumnId', ['Position Link', 'PositionLink']);
@@ -171,7 +183,7 @@ function processSidewaysInvites_(opts) {
             // Position — try Position Applied, Position, Job Title columns; fall back to textForEmail
             var position = rowMap['Position Applied'] || rowMap['Position'] || rowMap['Job Title'] || textForEmail;
 
-            var stepDetails = { sheetId: sheetId, rowId: row.id, email: candidateEmail, brand: brand, textForEmail: textForEmail };
+            var stepDetails = { sheetId: sheetId, sheetName: sheetName, rowId: row.id, email: candidateEmail, brand: brand, textForEmail: textForEmail };
             logEvent_(traceId, brand, candidateEmail, 'SIDEWAYS_ROW_FOUND', stepDetails);
 
             // Field validation
@@ -230,12 +242,14 @@ function processSidewaysInvites_(opts) {
               logEvent_(traceId, brand, candidateEmail, 'SIDEWAYS_DRYRUN_NO_UPDATE', { rowId: row.id });
               logEvent_(traceId, brand, candidateEmail, 'SIDEWAYS_COMPLETE', { rowId: row.id });
             } else {
-              // Update Smartsheet row: set SEND -> '🔔Sent' and Date Sent (if available)
-              var updates = {};
-              updates[sendColTitle] = '🔔Sent';
-              if (dateSentCol) updates[dateSentCol] = new Date().toISOString();
+              var cellsToUpdate = [{ columnId: Number(sendCol), value: '🔔Sent' }];
+              var dateSentValue = null;
+              if (dateSentColId) {
+                dateSentValue = new Date().toISOString();
+                cellsToUpdate.push({ columnId: Number(dateSentColId), value: dateSentValue });
+              }
 
-              var updateRes = updateSmartsheetRow_(sheetId, row.id, updates, apiToken);
+              var updateRes = patchRowCellsByColumnId_(sheetId, row.id, cellsToUpdate, apiToken);
               logEvent_(traceId, brand, candidateEmail, 'SIDEWAYS_SMARTSHEET_UPDATE', { rowId: row.id, ok: updateRes.ok, error: updateRes.error || null });
 
               if (!updateRes.ok) {
@@ -244,13 +258,19 @@ function processSidewaysInvites_(opts) {
                 continue;
               }
 
+              logEvent_(traceId, brand, candidateEmail, 'SIDEWAYS_ROW_UPDATED', {
+                sheetId: sheetId,
+                rowId: row.id,
+                send: '🔔Sent',
+                dateSent: dateSentValue
+              });
               Logger.log('[SIDEWAYS_UPDATE_SENT] rowId=' + row.id + ' updatedTo=🔔Sent');
               logEvent_(traceId, brand, candidateEmail, 'SIDEWAYS_COMPLETE', { rowId: row.id });
             }
           }
         }
 
-        logEvent_(traceId, brand, '', 'SIDEWAYS_SHEET_SUMMARY', { sheetId: sheetId, found: found });
+        logEvent_(traceId, brand, '', 'SIDEWAYS_SHEET_SUMMARY', { sheetId: sheetId, sheetName: sheetName, found: found });
       }
     }
   } catch (e) {
@@ -302,7 +322,7 @@ function fetchSmartsheet_(sheetId, apiToken) {
     var resp = UrlFetchApp.fetch(url, options);
     if (resp.getResponseCode() !== 200) return { ok: false, error: 'HTTP ' + resp.getResponseCode() };
     var data = JSON.parse(resp.getContentText());
-    return { ok: true, columns: data.columns || [], rows: data.rows || [] };
+    return { ok: true, name: data.name || '', columns: data.columns || [], rows: data.rows || [] };
   } catch (e) {
     return { ok: false, error: String(e) };
   }
@@ -372,6 +392,108 @@ function updateSmartsheetRow_(sheetId, rowId, updates, apiToken) {
   } catch (e) {
     return { ok: false, error: String(e) };
   }
+}
+
+/**
+ * Update specific Smartsheet cells by columnId for a row.
+ * Bypasses title-based mapping and formula-column skip logic.
+ * @param {string|number} sheetId
+ * @param {string|number} rowId
+ * @param {Array} cells - [{columnId:number, value:any}]
+ * @param {string} apiToken
+ * @returns {{ok:boolean, error?:string, partial?:boolean}}
+ */
+function patchRowCellsByColumnId_(sheetId, rowId, cells, apiToken) {
+  try {
+    if (!cells || !cells.length) return { ok: false, error: 'No cells provided' };
+
+    var validCells = [];
+    for (var i = 0; i < cells.length; i++) {
+      var c = cells[i] || {};
+      if (!c.columnId) continue;
+      validCells.push({ columnId: Number(c.columnId), value: c.value });
+    }
+    if (!validCells.length) return { ok: false, error: 'No valid columnId cells provided' };
+
+    // Preflight diagnostics for formula/locked-like columns.
+    var colMetaById = {};
+    var fetchRes = fetchSmartsheet_(sheetId, apiToken);
+    if (fetchRes.ok && fetchRes.columns) {
+      for (var fi = 0; fi < fetchRes.columns.length; fi++) {
+        var fc = fetchRes.columns[fi];
+        colMetaById[String(fc.id)] = fc;
+      }
+      var formulaLocked = [];
+      for (var vi = 0; vi < validCells.length; vi++) {
+        var meta = colMetaById[String(validCells[vi].columnId)];
+        if (meta && meta.formula) {
+          formulaLocked.push({ columnId: validCells[vi].columnId, title: meta.title || '', reason: 'column_formula' });
+        }
+      }
+      if (formulaLocked.length > 0) {
+        var formulaMsg = 'Formula/locked column(s) cannot be updated: ' + JSON.stringify(formulaLocked);
+        Logger.log('[patchRowCellsByColumnId_] ' + formulaMsg);
+        return { ok: false, code: 'FORMULA_OR_LOCKED', error: formulaMsg };
+      }
+    }
+
+    var body = [{ id: Number(rowId), cells: validCells }];
+    var url = SMARTSHEET_API_BASE + '/sheets/' + sheetId + '/rows';
+    var options = {
+      method: 'put',
+      contentType: 'application/json',
+      payload: JSON.stringify(body),
+      headers: { 'Authorization': 'Bearer ' + apiToken },
+      muteHttpExceptions: true
+    };
+
+    var resp = UrlFetchApp.fetch(url, options);
+    var code = resp.getResponseCode();
+    var text = resp.getContentText();
+    if (code >= 200 && code < 300) return { ok: true };
+
+    var lowerText = String(text || '').toLowerCase();
+    if (lowerText.indexOf('formula') !== -1 || lowerText.indexOf('locked') !== -1 || lowerText.indexOf('read only') !== -1) {
+      var lockMsg = 'Smartsheet rejected update (formula/locked/read-only column): HTTP ' + code + ' - ' + text;
+      Logger.log('[patchRowCellsByColumnId_] ' + lockMsg);
+      return { ok: false, code: 'FORMULA_OR_LOCKED', error: lockMsg };
+    }
+
+    // Safe fallback: retry one cell at a time to survive partial write constraints.
+    if (code === 400 && validCells.length > 1) {
+      var anyOk = false;
+      var cellErrors = [];
+      for (var ci = 0; ci < validCells.length; ci++) {
+        var singleBody = [{ id: Number(rowId), cells: [validCells[ci]] }];
+        var singleOpts = {
+          method: 'put',
+          contentType: 'application/json',
+          payload: JSON.stringify(singleBody),
+          headers: { 'Authorization': 'Bearer ' + apiToken },
+          muteHttpExceptions: true
+        };
+        var singleResp = UrlFetchApp.fetch(url, singleOpts);
+        var singleCode = singleResp.getResponseCode();
+        if (singleCode >= 200 && singleCode < 300) {
+          anyOk = true;
+        } else {
+          var singleText = String(singleResp.getContentText() || '');
+          cellErrors.push({ columnId: validCells[ci].columnId, code: singleCode, error: singleText.substring(0, 300) });
+        }
+      }
+      if (anyOk) return { ok: true, partial: true };
+      return { ok: false, error: 'Cell-by-columnId updates failed: HTTP ' + code + ' - ' + text + ' details=' + JSON.stringify(cellErrors) };
+    }
+
+    return { ok: false, error: 'HTTP ' + code + ' - ' + text };
+  } catch (e) {
+    return { ok: false, error: String(e) };
+  }
+}
+
+// Backward compatibility alias
+function updateSmartsheetCellsByColumnId_(sheetId, rowId, cells, apiToken) {
+  return patchRowCellsByColumnId_(sheetId, rowId, cells, apiToken);
 }
 
 
