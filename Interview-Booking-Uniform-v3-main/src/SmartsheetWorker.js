@@ -57,9 +57,46 @@ function processSidewaysInvites_(opts) {
         var colTitleToId = {};
         for (var i = 0; i < columns.length; i++) colTitleToId[columns[i].title] = columns[i].id;
 
-        var sendCol = colTitleToId['SEND Interview Invite'] || colTitleToId['Send Interview Invite'] || colTitleToId['SEND Interview'];
-        if (!sendCol) {
-          logEvent_(traceId, brand, '', 'SIDEWAYS_NO_SEND_COLUMN', { sheetId: sheetId });
+        // Resolve the "SEND ... Invite" column robustly (some sheets include emojis like "SEND 🔔1️⃣ Interview Invite")
+        var sendColTitle = null;
+        var sendCol = null;
+        if (colTitleToId['SEND Interview Invite']) {
+          sendColTitle = 'SEND Interview Invite';
+          sendCol = colTitleToId[sendColTitle];
+        } else if (colTitleToId['Send Interview Invite']) {
+          sendColTitle = 'Send Interview Invite';
+          sendCol = colTitleToId[sendColTitle];
+        } else if (colTitleToId['SEND Interview']) {
+          sendColTitle = 'SEND Interview';
+          sendCol = colTitleToId[sendColTitle];
+        } else {
+          // Fallback: pick best match containing both "send" and "invite" (prefer also "interview")
+          var best = null;
+          var bestScore = -1;
+          for (var sc = 0; sc < columns.length; sc++) {
+            var t = String(columns[sc].title || '');
+            var tl = t.toLowerCase();
+            if (tl.indexOf('send') === -1 || tl.indexOf('invite') === -1) continue;
+            var score = 0;
+            if (tl.indexOf('interview') !== -1) score += 5;
+            if (t.indexOf('🔔') !== -1) score += 2;
+            if (tl.indexOf('1') !== -1) score += 1;
+            score += 1; // base match
+            if (score > bestScore) {
+              bestScore = score;
+              best = columns[sc];
+            }
+          }
+          if (best && best.id) {
+            sendColTitle = best.title;
+            sendCol = best.id;
+          }
+        }
+
+        if (!sendCol || !sendColTitle) {
+          var sampleTitles = [];
+          for (var ct = 0; ct < Math.min(columns.length, 30); ct++) sampleTitles.push(columns[ct].title);
+          logEvent_(traceId, brand, '', 'SIDEWAYS_NO_SEND_COLUMN', { sheetId: sheetId, sampleTitles: sampleTitles });
           continue;
         }
 
@@ -156,9 +193,9 @@ function processSidewaysInvites_(opts) {
               continue;
             }
 
-            // Update Smartsheet row: set SEND Interview Invite -> '🔔Sent', Date Sent, Interview Link
+            // Update Smartsheet row: set the resolved SEND column -> '🔔Sent', Date Sent, Interview Link
             var updates = {};
-            updates['SEND Interview Invite'] = '🔔Sent';
+            updates[sendColTitle] = '🔔Sent';
             if (dateSentCol) updates[dateSentCol] = new Date().toISOString();
             if (interviewLinkCol) updates[interviewLinkCol] = chosenLink;
 
