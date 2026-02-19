@@ -159,19 +159,20 @@ function installProcessSidewaysTrigger() {
   // Remove any existing triggers for this function to avoid duplicates
   var existing = ScriptApp.getProjectTriggers();
   for (var i = 0; i < existing.length; i++) {
-    if (existing[i].getHandlerFunction() === 'processSidewaysInvites_') {
+    var handler = existing[i].getHandlerFunction();
+    if (handler === 'processSidewaysInvitesScheduled_' || handler === 'processSidewaysInvites_') {
       ScriptApp.deleteTrigger(existing[i]);
       Logger.log('Removed existing trigger: ' + existing[i].getUniqueId());
     }
   }
 
   // Create new every-5-minute trigger
-  var trigger = ScriptApp.newTrigger('processSidewaysInvites_')
+  var trigger = ScriptApp.newTrigger('processSidewaysInvitesScheduled_')
     .timeBased()
     .everyMinutes(5)
     .create();
 
-  Logger.log('✅ Trigger installed: processSidewaysInvites_ every 5 minutes (ID: ' + trigger.getUniqueId() + ')');
+  Logger.log('✅ Trigger installed: processSidewaysInvitesScheduled_ every 5 minutes (ID: ' + trigger.getUniqueId() + ')');
   Logger.log('Go to Triggers page in Apps Script to confirm.');
   return { ok: true, triggerId: trigger.getUniqueId(), interval: '5 minutes' };
 }
@@ -184,7 +185,8 @@ function removeProcessSidewaysTrigger() {
   var existing = ScriptApp.getProjectTriggers();
   var removed = 0;
   for (var i = 0; i < existing.length; i++) {
-    if (existing[i].getHandlerFunction() === 'processSidewaysInvites_') {
+    var handler = existing[i].getHandlerFunction();
+    if (handler === 'processSidewaysInvitesScheduled_' || handler === 'processSidewaysInvites_') {
       ScriptApp.deleteTrigger(existing[i]);
       removed++;
     }
@@ -213,12 +215,16 @@ function runSidewaysForBrand(brand, opts) {
 
   var dryRun = (opts.dryRun === undefined) ? true : !!opts.dryRun;
   var testEmail = opts.testEmail || null;
-  var limit = (opts.limit === undefined) ? 200 : Number(opts.limit);
 
   if (dryRun && !testEmail) testEmail = 'info@crewlifeatsea.com';
 
-  Logger.log('runSidewaysForBrand: brand=%s dryRun=%s testEmail=%s limit=%s', b, dryRun, testEmail || '(none)', limit);
-  var res = processSidewaysInvites_({ brand: b, dryRun: dryRun, testEmail: testEmail, limit: limit });
+  var workerOpts = { brand: b, dryRun: dryRun, testEmail: testEmail };
+  if (opts.limit !== undefined && opts.limit !== null && opts.limit !== '') {
+    workerOpts.limit = Number(opts.limit);
+  }
+
+  Logger.log('runSidewaysForBrand: brand=%s dryRun=%s testEmail=%s limit=%s', b, dryRun, testEmail || '(none)', workerOpts.limit === undefined ? '(none)' : workerOpts.limit);
+  var res = processSidewaysInvites_(workerOpts);
   Logger.log('runSidewaysForBrand: result=%s', JSON.stringify(res));
   return res;
 }

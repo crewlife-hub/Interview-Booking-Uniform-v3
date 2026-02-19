@@ -13,7 +13,12 @@ function processSidewaysInvites_(opts) {
   opts = opts || {};
   var dryRun = !!opts.dryRun;
   var testEmail = opts.testEmail || 'info@crewlifeatsea.com';
-  var limit = Number(opts.limit) || 200;
+  // Limit is optional. When omitted, we do not cap processing.
+  // Note: Apps Script runtime/quota may still impose practical limits.
+  var limit = (opts.limit === undefined || opts.limit === null || opts.limit === '')
+    ? Number.MAX_SAFE_INTEGER
+    : Number(opts.limit);
+  if (!isFinite(limit) || limit <= 0) limit = Number.MAX_SAFE_INTEGER;
   var brands = opts.brand ? [String(opts.brand).toUpperCase()] : getAllBrandCodes_();
 
   var traceId = generateTraceId_();
@@ -181,6 +186,14 @@ function processSidewaysInvites_(opts) {
 
   logEvent_(traceId, '', '', 'SIDEWAYS_RUN_COMPLETE', results);
   return { ok: true, summary: results };
+}
+
+/**
+ * Scheduled runner (time-based trigger target).
+ * Uses a conservative limit to reduce timeouts/quota spikes.
+ */
+function processSidewaysInvitesScheduled_() {
+  return processSidewaysInvites_({ limit: 200 });
 }
 
 
