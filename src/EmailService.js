@@ -21,8 +21,14 @@ function sendInviteEmail_(params) {
   try {
     var brandInfo = getBrand_(params.brand);
     var brandName = brandInfo ? brandInfo.name : params.brand;
-    var webAppUrl = getWebAppUrl_();
-    var bookingLink = webAppUrl + '?brand=' + params.brand + '&token=' + params.token;
+    // ── CANONICAL CTA BASE — never use getWebAppUrl_() for email links ──
+    var ctaBase = getEmailCtaBaseUrl_();
+    var bookingLink = ctaBase + '?page=access&token=' + encodeURIComponent(params.token || '');
+
+    // Diagnostic log
+    var isCalendar = bookingLink.indexOf('calendar.google.com') !== -1;
+    Logger.log('BOOKING_EMAIL_CTA_BUILT: ' + JSON.stringify({ brand: params.brand, ctaBase: ctaBase, isCalendar: isCalendar }));
+    logEvent_(params.traceId || '', params.brand || '', params.email || '', 'BOOKING_EMAIL_CTA_BUILT', { ctaBase: ctaBase, isCalendar: isCalendar, hasToken: !!(params.token) });
     
     var subject = params.isReissue
       ? '(Re-sent) Your Interview Booking Link – ' + brandName

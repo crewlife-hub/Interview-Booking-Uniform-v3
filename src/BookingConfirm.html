@@ -87,12 +87,10 @@
         <li>Choose a time that works for you</li>
       </ul>
       
-      <!-- Scanner-safe: Form submits POST to prevent scanners from burning the link -->
-      <form method="POST" action="<?= webAppUrl ?>" style="margin: 30px 0;">
-        <input type="hidden" name="action" value="redirect">
-        <input type="hidden" name="brand" value="<?= brand ?>">
-        <input type="hidden" name="email" value="<?= email ?>">
-        <input type="hidden" name="url" value="<?= bookingUrl ?>">
+      <!-- Token-gated: Always route through web app access gate (never direct booking URL) -->
+      <form method="GET" action="<?= webAppUrl ?>" style="margin: 30px 0;">
+        <input type="hidden" name="page" value="access">
+        <input type="hidden" name="token" value="<?= token ?>">
         
         <button type="submit" class="btn btn-success" style="padding: 15px 40px; font-size: 18px; width: 100%;">
           📅 Book Your Interview Now
@@ -100,7 +98,7 @@
       </form>
       
       <p style="color: #666; font-size: 12px;">
-        By clicking, you'll be redirected to the calendar scheduling page.
+        By clicking, you'll pass through secure one-time access before redirect.
       </p>
     </div>
   </div>

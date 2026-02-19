@@ -88,6 +88,8 @@ function processSidewaysInvites_(opts) {
             var textForEmail = rowMap[textForEmailCol] || '';
             var posLink = rowMap[positionLinkCol] || '';
             var interviewer = rowMap[interviewerCol] || '';
+            // Candidate name — try Full Name, Name, First Name columns
+            var candidateName = rowMap['Full Name'] || rowMap['Name'] || rowMap['First Name'] || '';
 
             var stepDetails = { sheetId: sheetId, rowId: row.id, email: candidateEmail, brand: brand, textForEmail: textForEmail };
             logEvent_(traceId, brand, candidateEmail, 'SIDEWAYS_ROW_FOUND', stepDetails);
@@ -134,6 +136,7 @@ function processSidewaysInvites_(opts) {
               brand: brand,
               textForEmail: textForEmail,
               bookingUrl: chosenLink,
+              candidateName: candidateName,
               traceId: traceId
             });
 

@@ -303,3 +303,175 @@ function getTokenHistory_(email, brand) {
   }
   return results;
 }
+
+/**
+ * Peek at a token's current status without modifying anything.
+ * Used by the confirm gate page to verify the token is still valid before showing UI.
+ * @param {string} token - Token string
+ * @returns {Object} { ok, status, brand, textForEmail, error, code }
+ */
+function peekToken_(token) {
+  if (!token) {
+    return { ok: false, error: 'Missing token', code: 'MISSING_TOKEN' };
+  }
+
+  var ss = getConfigSheet_();
+  var sheet = ss.getSheetByName('TOKENS');
+  if (!sheet) {
+    return { ok: false, error: 'System not initialized', code: 'NO_TOKEN_SHEET' };
+  }
+
+  var data = sheet.getDataRange().getValues();
+  if (data.length < 2) {
+    return { ok: false, error: 'Token not found', code: 'NOT_FOUND' };
+  }
+
+  var headers = data[0];
+  var idx = {};
+  for (var h = 0; h < headers.length; h++) {
+    idx[headers[h]] = h;
+  }
+
+  for (var i = 1; i < data.length; i++) {
+    if (String(data[i][idx['Token']]) === token) {
+      var row = data[i];
+      var status = String(row[idx['Status']] || '');
+      var expiry = new Date(row[idx['Expiry']]);
+
+      if (status === 'USED') {
+        return { ok: false, error: 'This link has already been used. Please request a new OTP.', code: 'ALREADY_USED' };
+      }
+      if (new Date() > expiry) {
+        return { ok: false, error: 'This link has expired. Please request a new OTP.', code: 'EXPIRED' };
+      }
+      if (status !== 'VERIFIED') {
+        return { ok: false, error: 'This link is not ready. Please verify your OTP first.', code: 'NOT_VERIFIED' };
+      }
+
+      return {
+        ok: true,
+        status: status,
+        brand: String(row[idx['Brand']] || ''),
+        textForEmail: String(row[idx['Text For Email']] || '')
+      };
+    }
+  }
+
+  return { ok: false, error: 'Token not found or invalid', code: 'NOT_FOUND' };
+}
+
+/**
+ * Consume a VERIFIED token for one-time redirect.
+ * Uses LockService for atomicity — marks USED + sets Used At BEFORE returning the booking URL.
+ * After this call, any subsequent access with the same token will get ALREADY_USED.
+ * @param {string} token - Token string
+ * @param {string} traceId - Trace ID
+ * @returns {Object} { ok, bookingUrl, brand, textForEmail, error, code }
+ */
+function consumeTokenForRedirect_(token, traceId) {
+  if (!token) {
+    return { ok: false, error: 'Missing token', code: 'MISSING_TOKEN' };
+  }
+
+  var lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(10000);
+  } catch (e) {
+    return { ok: false, error: 'System busy. Please try again.', code: 'LOCK_TIMEOUT' };
+  }
+
+  try {
+    var ss = getConfigSheet_();
+    var sheet = ss.getSheetByName('TOKENS');
+    if (!sheet) {
+      return { ok: false, error: 'System not initialized', code: 'NO_TOKEN_SHEET' };
+    }
+
+    var data = sheet.getDataRange().getValues();
+    if (data.length < 2) {
+      return { ok: false, error: 'Token not found', code: 'NOT_FOUND' };
+    }
+
+    var headers = data[0];
+    var idx = {};
+    for (var h = 0; h < headers.length; h++) {
+      idx[headers[h]] = h;
+    }
+
+    // Find token row
+    var targetRow = -1;
+    for (var i = 1; i < data.length; i++) {
+      if (String(data[i][idx['Token']]) === token) {
+        targetRow = i;
+        break;
+      }
+    }
+
+    if (targetRow === -1) {
+      return { ok: false, error: 'Token not found or invalid', code: 'NOT_FOUND' };
+    }
+
+    var row = data[targetRow];
+    var status = String(row[idx['Status']] || '');
+    var expiry = new Date(row[idx['Expiry']]);
+    var sheetRow = targetRow + 1;
+
+    // Already used — hard block
+    if (status === 'USED') {
+      return { ok: false, error: 'This link has already been used. Please request a new OTP.', code: 'ALREADY_USED' };
+    }
+
+    // Expired
+    if (new Date() > expiry) {
+      if (status !== 'EXPIRED') {
+        sheet.getRange(sheetRow, idx['Status'] + 1).setValue('EXPIRED');
+      }
+      return { ok: false, error: 'This link has expired. Please request a new OTP.', code: 'EXPIRED' };
+    }
+
+    // Must be VERIFIED (OTP was verified)
+    if (status !== 'VERIFIED') {
+      return { ok: false, error: 'This link is not ready. Please verify your OTP first.', code: 'NOT_VERIFIED' };
+    }
+
+    // Get booking URL from Position Link
+    var posLinkIdx = idx['Position Link'];
+    var bookingUrl = (posLinkIdx !== undefined) ? String(row[posLinkIdx] || '') : '';
+
+    // Validate booking URL — must not be empty
+    if (!bookingUrl) {
+      logEvent_(traceId, String(row[idx['Brand']] || ''), '', 'REDIRECT_BLOCKED', { reason: 'Position Link empty' });
+      return { ok: false, error: 'Booking link not configured. Please contact your recruiter.', code: 'NO_BOOKING_URL' };
+    }
+
+    // Block suspicious / misconfigured URLs
+    if (bookingUrl.indexOf('script.google.com') !== -1 || bookingUrl.indexOf('docs.google.com/forms') !== -1) {
+      logEvent_(traceId, String(row[idx['Brand']] || ''), '', 'REDIRECT_BLOCKED', {
+        reason: 'Suspicious URL',
+        url: maskUrl_(bookingUrl)
+      });
+      return { ok: false, error: 'Booking link misconfigured. Contact support.', code: 'BAD_BOOKING_URL' };
+    }
+
+    // === ATOMIC: Mark USED + set Used At BEFORE returning booking URL ===
+    sheet.getRange(sheetRow, idx['Status'] + 1).setValue('USED');
+    if (idx['Used At'] !== undefined) {
+      sheet.getRange(sheetRow, idx['Used At'] + 1).setValue(new Date());
+    }
+
+    logEvent_(traceId, String(row[idx['Brand']] || ''), '', 'TOKEN_CONSUMED', {
+      token: token.substring(0, 8) + '...',
+      bookingUrl: maskUrl_(bookingUrl)
+    });
+
+    return {
+      ok: true,
+      bookingUrl: bookingUrl,
+      brand: String(row[idx['Brand']] || ''),
+      textForEmail: String(row[idx['Text For Email']] || '')
+    };
+
+  } finally {
+    lock.releaseLock();
+  }
+}

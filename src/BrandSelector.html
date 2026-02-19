@@ -4,144 +4,518 @@
   <base target="_top">
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Enter CL Code & Email</title>
+  <title>Interview Booking</title>
   <?!= include_('Styles'); ?>
+  <style>
+    body {
+      background:
+        radial-gradient(1200px 700px at 10% -10%, rgba(22, 95, 157, 0.12), transparent 60%),
+        radial-gradient(900px 500px at 95% 0%, rgba(32, 165, 196, 0.12), transparent 55%),
+        linear-gradient(180deg, #f5f9ff 0%, #eef4fb 100%);
+      min-height: 100vh;
+      color: #0f1f3b;
+      position: relative;
+      overflow-x: hidden;
+    }
+
+    body::before {
+      content: '';
+      position: fixed;
+      inset: auto -120px -90px auto;
+      width: 480px;
+      height: 480px;
+      background: url('https://i.imgur.com/LgfOne5.png') no-repeat center/contain;
+      opacity: 0.05;
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    .lux-header {
+      position: sticky;
+      top: 0;
+      z-index: 5;
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      background: rgba(7, 26, 52, 0.72);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.18);
+      color: #fff;
+      padding: 14px 22px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+    }
+
+    .brand-block {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      min-width: 0;
+    }
+
+    .brand-logo {
+      width: 42px;
+      height: 42px;
+      border-radius: 10px;
+      object-fit: cover;
+      background: rgba(255, 255, 255, 0.15);
+      padding: 3px;
+    }
+
+    .brand-title {
+      font-weight: 700;
+      letter-spacing: 0.2px;
+      margin: 0;
+      font-size: 1.05rem;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .header-note {
+      font-size: 0.86rem;
+      opacity: 0.9;
+      font-weight: 500;
+      text-align: right;
+    }
+
+    .layout {
+      position: relative;
+      z-index: 1;
+      max-width: 1180px;
+      margin: 24px auto 8px;
+      padding: 0 20px;
+      display: grid;
+      grid-template-columns: 1.08fr 1fr;
+      gap: 22px;
+      align-items: stretch;
+    }
+
+    .left-panel,
+    .form-panel {
+      border-radius: 18px;
+      box-shadow: 0 18px 48px rgba(10, 35, 68, 0.12);
+      border: 1px solid rgba(9, 55, 106, 0.11);
+    }
+
+    .left-panel {
+      padding: 34px 28px;
+      background: linear-gradient(165deg, #06264a 0%, #103d69 100%);
+      color: #e9f4ff;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .left-panel::after {
+      content: '';
+      position: absolute;
+      right: -120px;
+      bottom: -140px;
+      width: 300px;
+      height: 300px;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(96, 215, 255, 0.28), rgba(96, 215, 255, 0));
+      pointer-events: none;
+    }
+
+    .eyebrow {
+      display: inline-block;
+      font-size: 0.78rem;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      color: #9bd6ff;
+      margin-bottom: 10px;
+      font-weight: 700;
+    }
+
+    .left-panel h2 {
+      margin: 0 0 12px;
+      font-size: 1.75rem;
+      line-height: 1.2;
+      color: #fff;
+    }
+
+    .left-panel p {
+      margin: 0 0 18px;
+      opacity: 0.96;
+    }
+
+    .checklist {
+      list-style: none;
+      padding: 0;
+      margin: 14px 0 0;
+    }
+
+    .checklist li {
+      margin: 11px 0;
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      font-size: 0.96rem;
+    }
+
+    .tick {
+      color: #7df7c4;
+      font-weight: 700;
+      margin-top: 1px;
+    }
+
+    .form-panel {
+      background: rgba(255, 255, 255, 0.92);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      padding: 28px;
+    }
+
+    .form-panel h3 {
+      margin: 0 0 4px;
+      font-size: 1.35rem;
+      color: #132948;
+    }
+
+    .subtle {
+      color: #5a6b86;
+      margin: 0 0 18px;
+      font-size: 0.95rem;
+    }
+
+    .field {
+      margin-top: 12px;
+    }
+
+    .field label {
+      display: block;
+      margin-bottom: 7px;
+      font-weight: 650;
+      color: #1c3252;
+      font-size: 0.93rem;
+    }
+
+    .helper {
+      margin-top: 6px;
+      color: #5f6f88;
+      font-size: 0.86rem;
+    }
+
+    #startBtn {
+      margin-top: 14px;
+      width: 100%;
+      border-radius: 12px;
+      min-height: 48px;
+      font-size: 0.98rem;
+      font-weight: 700;
+      letter-spacing: 0.2px;
+      box-shadow: 0 8px 22px rgba(0, 102, 204, 0.2);
+    }
+
+    #msg {
+      margin-top: 14px;
+      border-radius: 10px;
+      border-width: 1px;
+      border-style: solid;
+      padding: 12px 14px;
+      font-size: 0.92rem;
+      line-height: 1.45;
+    }
+
+    #msg.alert-danger {
+      background: #fff4f5;
+      border-color: #f4c7ce;
+      color: #8b1f2d;
+    }
+
+    #msg.alert-success {
+      background: #f2fff7;
+      border-color: #c6f0d8;
+      color: #115a35;
+    }
+
+    .lux-footer {
+      position: relative;
+      z-index: 1;
+      max-width: 1180px;
+      margin: 6px auto 20px;
+      padding: 0 20px;
+      color: #224063;
+      text-align: center;
+      font-size: 0.88rem;
+    }
+
+    .social-row {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 11px;
+      flex-wrap: wrap;
+      margin: 10px 0 8px;
+    }
+
+    .social-link {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 36px;
+      height: 36px;
+      border-radius: 10px;
+      background: rgba(255, 255, 255, 0.78);
+      border: 1px solid rgba(12, 59, 102, 0.14);
+      transition: transform 0.15s ease, box-shadow 0.15s ease;
+    }
+
+    .social-link:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 8px 18px rgba(16, 57, 102, 0.18);
+    }
+
+    .social-link img {
+      width: 18px;
+      height: 18px;
+      object-fit: contain;
+      display: block;
+    }
+
+    .text-links a {
+      color: #0b4278;
+      font-weight: 600;
+      text-decoration: none;
+      margin: 0 8px;
+      white-space: nowrap;
+    }
+
+    .text-links a:hover {
+      text-decoration: underline;
+    }
+
+    @media (max-width: 980px) {
+      .layout {
+        grid-template-columns: 1fr;
+      }
+
+      .header-note {
+        display: none;
+      }
+    }
+
+    @media (max-width: 560px) {
+      .lux-header {
+        padding: 12px 14px;
+      }
+
+      .layout,
+      .lux-footer {
+        padding: 0 12px;
+      }
+
+      .left-panel,
+      .form-panel {
+        border-radius: 14px;
+      }
+
+      .left-panel {
+        padding: 22px 18px;
+      }
+
+      .form-panel {
+        padding: 20px 16px;
+      }
+    }
+  </style>
 </head>
 <body>
-  <div class="header">
-    <h1>🔐 Enter CL Code & Email</h1>
-    <div class="user-info">Start here to request your OTP</div>
+  <div class="lux-header">
+    <div class="brand-block">
+      <img class="brand-logo" src="https://i.imgur.com/LgfOne5.png" alt="Crew Life at Sea logo">
+      <h1 class="brand-title">Interview Booking</h1>
+    </div>
+    <div class="header-note">Secure one-time login code</div>
   </div>
 
-  <div class="container">
-    <div class="card" style="max-width:600px;margin:40px auto;padding:20px;">
-      <h2>Enter your reference and email</h2>
-      <p class="text-muted">Provide the CLxxx reference and your email to receive an OTP.</p>
+  <div class="layout">
+    <section class="left-panel">
+      <span class="eyebrow">Crew Life at Sea</span>
+      <h2>Secure One-Time Login</h2>
+      <p>Access your interview booking with a one-time passcode sent to your registered email.</p>
 
-      <div style="margin-top:16px;">
+      <ul class="checklist">
+        <li><span class="tick">✔</span><span>Select your brand and Position Applied.</span></li>
+        <li><span class="tick">✔</span><span>Use the same email you applied with.</span></li>
+        <li><span class="tick">✔</span><span>Your OTP expires in a few minutes.</span></li>
+        <li><span class="tick">✔</span><span>Single-use security flow protects your booking link.</span></li>
+      </ul>
+    </section>
+
+    <section class="form-panel">
+      <h3>Enter your details</h3>
+      <p class="subtle">Complete the fields below to receive your secure OTP.</p>
+
+      <div class="field">
         <label for="brand">Brand</label>
-        <select id="brand" class="form-control" onchange="populatePositions()">
+        <select id="brand" class="form-control" onchange="populateTextForEmail()">
+          <option value="">-- Select your brand --</option>
           <? for (var i = 0; i < brands.length; i++) { ?>
             <option value="<?= brands[i] ?>"><?= brands[i] ?></option>
           <? } ?>
         </select>
       </div>
 
-      <div style="margin-top:12px;">
-        <label for="position">Position</label>
-        <select id="position" class="form-control" onchange="onPositionChange()">
+      <div class="field">
+        <label for="textForEmail">Position Applied</label>
+        <select id="textForEmail" class="form-control" disabled>
           <option value="">Loading positions…</option>
         </select>
       </div>
 
-      <div style="margin-top:12px;">
-        <label for="clcode">CL Code</label>
-        <input id="clcode" class="form-control" placeholder="e.g. CL200" />
-      </div>
-
-      <div style="margin-top:12px;">
+      <div class="field">
         <label for="email">Email</label>
-        <input id="email" class="form-control" placeholder="you@example.com" />
+        <input id="email" type="email" class="form-control" placeholder="you@example.com" />
+        <div class="helper">Use the same email you applied with.</div>
       </div>
 
-      <div style="text-align:center;margin-top:18px;">
+      <div class="helper">Your OTP expires in a few minutes.</div>
+
+      <div>
         <button id="startBtn" class="btn btn-primary" onclick="startOtp()">📧 Send OTP</button>
       </div>
 
-      <div id="msg" style="margin-top:16px;display:none"></div>
-    </div>
+      <div id="msg" role="alert" style="display:none"></div>
+    </section>
   </div>
+
+  <footer class="lux-footer">
+    <div>© Crew Life at Sea Pty Ltd — All Rights Reserved</div>
+    <div class="social-row">
+      <a class="social-link" href="https://www.facebook.com/crewlifeatsea" target="_blank" rel="noopener noreferrer" aria-label="Facebook">
+        <img src="https://i.imgur.com/aUGpDRf.png" alt="Facebook">
+      </a>
+      <a class="social-link" href="https://www.linkedin.com/in/crew-life-at-sea/" target="_blank" rel="noopener noreferrer" aria-label="LinkedIn">
+        <img src="https://i.imgur.com/sPkM3Vi.png" alt="LinkedIn">
+      </a>
+      <a class="social-link" href="https://www.instagram.com/crewlifeatsea/" target="_blank" rel="noopener noreferrer" aria-label="Instagram">
+        <img src="https://i.imgur.com/kjJx61C.png" alt="Instagram">
+      </a>
+      <a class="social-link" href="https://www.tiktok.com/@crewlifeatsea?lang=en" target="_blank" rel="noopener noreferrer" aria-label="TikTok">
+        <img src="https://i.imgur.com/ke5QxAo.png" alt="TikTok">
+      </a>
+      <a class="social-link" href="https://linktr.ee/CrewLifeatSeaSocials?utm_source=ig&utm_medium=social&utm_content=link_in_bio&fbclid=PAZXh0bgNhZW0CMTEAc3J0YwZhcHBfaWQMMjU2MjgxMDQwNTU4AAGnXbF3s1ELQ6MjHhEg0KWmFr6Q99_8vnFMp_xG2GrXOj4HRINVTmqumbtympU_aem_VWtzhCMiaC8ePm8Q4J6rOQ" target="_blank" rel="noopener noreferrer" aria-label="X">
+        <img src="https://i.imgur.com/XvJsjmO.png" alt="X">
+      </a>
+      <a class="social-link" href="https://www.youtube.com/@crewlifeatsea" target="_blank" rel="noopener noreferrer" aria-label="YouTube">
+        <img src="https://i.imgur.com/caTSURd.png" alt="YouTube">
+      </a>
+    </div>
+    <div class="text-links">
+      <a href="https://linktr.ee/CrewLifeatSeaSocials?utm_source=ig&utm_medium=social&utm_content=link_in_bio&fbclid=PAZXh0bgNhZW0CMTEAc3J0YwZhcHBfaWQMMjU2MjgxMDQwNTU4AAGnXbF3s1ELQ6MjHhEg0KWmFr6Q99_8vnFMp_xG2GrXOj4HRINVTmqumbtympU_aem_VWtzhCMiaC8ePm8Q4J6rOQ" target="_blank" rel="noopener noreferrer">Linktree</a>
+      <a href="https://tr.ee/BLRXi0gyTr" target="_blank" rel="noopener noreferrer">Pinterest</a>
+    </div>
+  </footer>
 
   <div class="version-tag">v<?= version ?></div>
 
   <script>
-    function populatePositions() {
-      var brand = document.getElementById('brand').value;
-      var sel = document.getElementById('position');
-      sel.innerHTML = '<option value="">Loading positions…</option>';
-      google.script.run.withSuccessHandler(function(res) {
-        sel.innerHTML = '';
-        // Add empty first option
-        var emptyOpt = document.createElement('option');
-        emptyOpt.value = '';
-        emptyOpt.text = '-- Select a position --';
-        sel.appendChild(emptyOpt);
-
-        if (!res || res.length === 0) {
-          emptyOpt.text = '-- No positions found --';
-          return;
-        }
-        res.forEach(function(item) {
-          var opt = document.createElement('option');
-          opt.value = item.defaultCLCode || '';
-          var label = item.jobTitle || '(untitled)';
-          var code = item.defaultCLCode || '';
-          opt.text = label + (code ? ' — ' + code : '');
-          opt.dataset.jobTitle = item.jobTitle || '';
-          sel.appendChild(opt);
-        });
-      }).withFailureHandler(function(err) {
-        sel.innerHTML = '<option value="">Error loading positions</option>';
-        console.error('populatePositions error:', err);
-      }).getJobsForBrandApi(brand);
+    function isValidEmail_(value) {
+      return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || '').trim());
     }
 
-    function onPositionChange() {
-      var sel = document.getElementById('position');
-      var clIn = document.getElementById('clcode');
-      if (sel && sel.value) clIn.value = sel.value;
-    }
-
-    function startOtp() {
-      var btn = document.getElementById('startBtn');
-      var brand = document.getElementById('brand').value;
-      var clcode = document.getElementById('clcode').value.trim();
+    function syncStartButtonState_() {
+      var brand = document.getElementById('brand').value.trim();
+      var textForEmail = document.getElementById('textForEmail').value.trim();
       var email = document.getElementById('email').value.trim();
-      var msg = document.getElementById('msg');
+      var btn = document.getElementById('startBtn');
+      btn.disabled = !(brand && textForEmail && isValidEmail_(email));
+    }
 
-      msg.style.display = 'none';
+    function populateTextForEmail() {
+      var brand = document.getElementById('brand').value;
+      var sel   = document.getElementById('textForEmail');
+      sel.innerHTML = '<option value="">Loading positions…</option>';
+      sel.disabled  = true;
+      syncStartButtonState_();
 
-      // if CL code empty but a position selected, use that
-      if (!clcode) {
-        var sel = document.getElementById('position');
-        if (sel && sel.value) clcode = sel.value;
-      }
-
-      if (!clcode || !email) {
-        msg.style.display = 'block';
-        msg.className = 'alert alert-danger';
-        msg.textContent = 'Please enter both CL code and email.';
+      if (!brand) {
+        sel.innerHTML = '<option value="">-- Select a brand first --</option>';
+        sel.disabled = true;
+        syncStartButtonState_();
         return;
       }
 
-      btn.disabled = true;
-      btn.textContent = 'Sending...';
+      google.script.run
+        .withSuccessHandler(function(options) {
+          sel.innerHTML = '';
+          sel.disabled  = false;
+          var placeholder = document.createElement('option');
+          placeholder.value = '';
+          placeholder.text  = (options && options.length) ? '-- Select your position --' : '-- No positions found --';
+          sel.appendChild(placeholder);
+          if (options && options.length) {
+            options.forEach(function(val) {
+              var opt   = document.createElement('option');
+              opt.value = val;
+              opt.text  = val;
+              sel.appendChild(opt);
+            });
+          }
+          syncStartButtonState_();
+        })
+        .withFailureHandler(function(err) {
+          sel.innerHTML = '<option value="">Error loading positions</option>';
+          sel.disabled  = false;
+          console.error('populateTextForEmail error:', err);
+          syncStartButtonState_();
+        })
+        .getTextForEmailOptionsForBrandApi(brand);
+    }
+
+    function startOtp() {
+      var btn          = document.getElementById('startBtn');
+      var brand        = document.getElementById('brand').value.trim();
+      var textForEmail = document.getElementById('textForEmail').value.trim();
+      var email        = document.getElementById('email').value.trim();
+
+      showMsg('', '');
+
+      if (!brand) { showMsg('danger', 'Please select a brand.'); return; }
+      if (!textForEmail) { showMsg('danger', 'Please select your position.'); return; }
+      if (!email) { showMsg('danger', 'Please enter your email address.'); return; }
+
+      btn.disabled    = true;
+      btn.textContent = 'Sending…';
 
       google.script.run
         .withSuccessHandler(function(res) {
-          btn.disabled = false;
+          btn.disabled    = false;
           btn.textContent = '📧 Send OTP';
-          if (res.ok) {
+          if (res && res.ok) {
             window.location.href = res.verifyUrl;
           } else {
-            msg.style.display = 'block';
-            msg.className = 'alert alert-danger';
-            msg.textContent = res.error || 'Failed to start OTP flow.';
+            showMsg('danger', (res && res.error) || 'Failed to start OTP flow.');
           }
         })
         .withFailureHandler(function(err) {
-          btn.disabled = false;
+          btn.disabled    = false;
           btn.textContent = '📧 Send OTP';
-          msg.style.display = 'block';
-          msg.className = 'alert alert-danger';
-          msg.textContent = err.message || 'An unexpected error occurred.';
+          showMsg('danger', (err && err.message) || 'An unexpected error occurred.');
         })
-        .startOtpByBrandCl_({ brand: brand, clCode: clcode, email: email });
+        .startOtpByTextForEmail({ brand: brand, email: email, textForEmail: textForEmail });
     }
 
-    // populate initial positions on load
-    (function(){
-      try { populatePositions(); } catch(e) { /* ignore */ }
+    function showMsg(type, text) {
+      var msg = document.getElementById('msg');
+      if (!type && !text) { msg.style.display = 'none'; return; }
+      msg.style.display = 'block';
+      msg.className     = 'alert alert-' + type;
+      msg.textContent   = text;
+    }
+
+    document.getElementById('email').addEventListener('input', syncStartButtonState_);
+    document.getElementById('textForEmail').addEventListener('change', syncStartButtonState_);
+    document.getElementById('brand').addEventListener('change', syncStartButtonState_);
+
+    // Populate on page load
+    (function() {
+      try {
+        syncStartButtonState_();
+        populateTextForEmail();
+      } catch(e) {}
     })();
   </script>
 </body>

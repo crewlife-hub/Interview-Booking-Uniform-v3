@@ -263,11 +263,8 @@ function validateOtp_(params) {
   
   // Validate OTP value
   if (rowOtp === otp) {
-    // SUCCESS - mark as VERIFIED
+    // SUCCESS - mark as VERIFIED (Used At will be set when secure access link is consumed)
     sheet.getRange(sheetRow, idx['Status'] + 1).setValue('VERIFIED');
-    if (idx['Used At'] !== undefined) {
-      sheet.getRange(sheetRow, idx['Used At'] + 1).setValue(new Date());
-    }
     
     logEvent_(traceId, rowBrand, rowEmail, 'OTP_VERIFIED', { textForEmail: rowTextForEmail });
     
@@ -417,6 +414,65 @@ function sendOtpEmail_(params) {
 }
 
 /**
+ * Issue a VERIFIED one-time access token row that points to a booking URL.
+ * Used when a caller still provides bookingUrl and needs secure access-gate CTA.
+ * @param {Object} params
+ * @returns {{ok:boolean, token?:string, error?:string}}
+ */
+function issueVerifiedAccessTokenForBooking_(params) {
+  var email = String(params.email || '').toLowerCase().trim();
+  var brand = String(params.brand || '').toUpperCase().trim();
+  var textForEmail = String(params.textForEmail || '').trim();
+  var bookingUrl = String(params.bookingUrl || '').trim();
+  var traceId = params.traceId || generateTraceId_();
+
+  if (!email || !brand || !textForEmail || !bookingUrl) {
+    return { ok: false, error: 'Missing required parameters for access token' };
+  }
+
+  var created = createOtp_({
+    email: email,
+    brand: brand,
+    textForEmail: textForEmail,
+    traceId: traceId,
+    candidate: { 'Position Link': bookingUrl }
+  });
+  if (!created.ok || !created.token) {
+    return { ok: false, error: created.error || 'Failed to create access token' };
+  }
+
+  var ss = getConfigSheet_();
+  var sheet = ss.getSheetByName('TOKENS');
+  if (!sheet) return { ok: false, error: 'TOKENS sheet not found' };
+
+  var data = sheet.getDataRange().getValues();
+  if (data.length < 2) return { ok: false, error: 'TOKENS sheet is empty' };
+
+  var headers = data[0];
+  var idx = {};
+  for (var h = 0; h < headers.length; h++) idx[headers[h]] = h;
+
+  var tokenRow = -1;
+  for (var r = 1; r < data.length; r++) {
+    if (String(data[r][idx['Token']]) === created.token) {
+      tokenRow = r + 1;
+      break;
+    }
+  }
+  if (tokenRow === -1) return { ok: false, error: 'Created token row not found' };
+
+  if (idx['Status'] !== undefined) sheet.getRange(tokenRow, idx['Status'] + 1).setValue('VERIFIED');
+  if (idx['Attempts'] !== undefined) sheet.getRange(tokenRow, idx['Attempts'] + 1).setValue(0);
+
+  logEvent_(traceId, brand, email, 'ACCESS_TOKEN_ISSUED', {
+    token: created.token.substring(0, 8) + '...',
+    bookingUrl: maskUrl_(bookingUrl)
+  });
+
+  return { ok: true, token: created.token };
+}
+
+/**
  * Send booking confirmation email with calendar link after OTP verified
  * HARDENED: validates inputs, checks template exists, logs masked email
  * @param {Object} params - Email parameters
@@ -426,17 +482,71 @@ function sendBookingConfirmEmail_(params) {
   var email = String(params.email || '').toLowerCase().trim();
   var brand = String(params.brand || '').toUpperCase();
   var textForEmail = String(params.textForEmail || '').trim();
+  var accessUrl = String(params.accessUrl || '').trim();
+  var token = String(params.token || '').trim();
   var bookingUrl = String(params.bookingUrl || '').trim();
+  var candidateName = String(params.candidateName || '').trim() || 'Candidate';
   var traceId = params.traceId || generateTraceId_();
-  
+
+  // ── CANONICAL CTA BASE — never use getWebAppUrl_() for email links ──
+  var ctaBase = getEmailCtaBaseUrl_();
+
+  // If caller passes accessUrl only, extract token so we can rebuild canonical gate URL.
+  if (!token && accessUrl) {
+    try {
+      var tokenMatch = accessUrl.match(/[?&]token=([^&]+)/i);
+      if (tokenMatch && tokenMatch[1]) {
+        token = decodeURIComponent(tokenMatch[1]);
+      }
+    } catch (e) {}
+  }
+
+  if (!token && bookingUrl) {
+    var issued = issueVerifiedAccessTokenForBooking_({
+      email: email,
+      brand: brand,
+      textForEmail: textForEmail,
+      bookingUrl: bookingUrl,
+      traceId: traceId
+    });
+    if (!issued.ok) {
+      Logger.log('[sendBookingConfirmEmail_] Failed to issue access token from bookingUrl: %s', issued.error || 'unknown');
+      return { ok: false, error: issued.error || 'Failed to create secure access link' };
+    }
+    token = issued.token;
+  }
+
+  // Canonicalize CTA URL: ALWAYS use hardcoded canonical web app URL + token.
+  if (token) {
+    accessUrl = ctaBase + '?page=access&token=' + encodeURIComponent(token);
+  }
+
+  // ── Diagnostic log ──
+  var isCalendar = accessUrl.indexOf('calendar.google.com') !== -1;
+  logEvent_(traceId, brand, email, 'BOOKING_EMAIL_CTA_BUILT', {
+    ctaBase: ctaBase,
+    isCalendar: isCalendar,
+    hasToken: !!token
+  });
+  Logger.log('BOOKING_EMAIL_CTA_BUILT: ' + JSON.stringify({ brand: brand, ctaBase: ctaBase, isCalendar: isCalendar }));
+
   // Input validation
   if (!email || email.indexOf('@') === -1) {
     Logger.log('[sendBookingConfirmEmail_] Invalid email');
     return { ok: false, error: 'Invalid email address' };
   }
-  if (!bookingUrl) {
-    Logger.log('[sendBookingConfirmEmail_] Missing bookingUrl');
-    return { ok: false, error: 'Missing booking URL - cannot send email without link' };
+  if (!accessUrl) {
+    Logger.log('[sendBookingConfirmEmail_] Missing access URL');
+    return { ok: false, error: 'Missing access URL - cannot send email without link' };
+  }
+  // Reject any CTA that contains a calendar URL — must be our web app
+  if (accessUrl.indexOf('calendar.google.com') !== -1) {
+    Logger.log('[sendBookingConfirmEmail_] BLOCKED calendar URL in CTA: %s', maskUrl_(accessUrl));
+    return { ok: false, error: 'Email CTA must not contain calendar URL' };
+  }
+  if (accessUrl.indexOf(ctaBase) !== 0) {
+    Logger.log('[sendBookingConfirmEmail_] Rejected non-canonical CTA: %s', maskUrl_(accessUrl));
+    return { ok: false, error: 'Access link must route through canonical web app URL' };
   }
   
   var brandInfo = getBrand_(brand);
@@ -455,10 +565,12 @@ function sendBookingConfirmEmail_(params) {
   
   htmlBody.brandName = brandName;
   htmlBody.textForEmail = textForEmail;
-  htmlBody.bookingUrl = bookingUrl;
+  htmlBody.candidateName = candidateName;
+  htmlBody.gateUrl = accessUrl;
+  htmlBody.accessUrl = accessUrl;
   
   var maskedEmail = email.substring(0, 3) + '***@' + email.split('@')[1];
-  Logger.log('[sendBookingConfirmEmail_] Sending to %s (masked: %s), bookingUrl=%s', email, maskedEmail, bookingUrl.substring(0, 60));
+  Logger.log('[sendBookingConfirmEmail_] Sending to %s (masked: %s), accessUrl=%s', email, maskedEmail, maskUrl_(accessUrl));
   
   try {
     MailApp.sendEmail({
@@ -468,7 +580,7 @@ function sendBookingConfirmEmail_(params) {
       name: 'Crew Life at Sea'
     });
     
-    logEvent_(traceId, brand, maskedEmail, 'BOOKING_EMAIL_SENT', { bookingUrl: bookingUrl.substring(0, 80) });
+    logEvent_(traceId, brand, maskedEmail, 'BOOKING_EMAIL_SENT', { accessUrl: maskUrl_(accessUrl) });
     Logger.log('[sendBookingConfirmEmail_] SUCCESS - email sent to %s', maskedEmail);
     return { ok: true };
   } catch (e) {

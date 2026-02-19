@@ -8,6 +8,50 @@ var APP_VERSION = '1.0.0';
 var CONFIG_SHEET_ID = '1qM3ZEdBsvbEofDH8DayRWcRa4bUcrKQIv8kzKSYZ1AM';
 // Default exec URL — replaceable via Script Properties `WEB_APP_EXEC_URL` or `DEPLOY_ID`
 var WEB_APP_EXEC_URL_DEFAULT = 'https://script.google.com/macros/s/AKfycbzL1GZHA4DoMNhDT5-6LuYlXw2YPyYZI444dJFOHvrUtPXZorO4P7Sx1i8-Qe1bKKmxPQ/exec';
+var WEB_APP_EXEC_URL_TARGET = 'https://script.google.com/a/macros/seainfogroup.com/s/AKfycby0PpZHzKMuJmlMLs4Xl5l6T_e2UyzTvTdDlNOneFyyyuWlHl_i_-8ZSqu2QEBkq4qbxg/exec';
+
+/**
+ * CANONICAL web app URL used for ALL email CTAs.
+ * This MUST be the token-gate entry point — never a calendar URL.
+ * Email CTA helpers call this instead of getWebAppUrl_() to guarantee
+ * the link is always the correct /exec endpoint regardless of script properties.
+ * Deployment @103 - Feb 19 2026 - FRESH DEPLOY with all CTA fixes.
+ */
+var CANONICAL_WEB_APP_URL = 'https://script.google.com/a/macros/seainfogroup.com/s/AKfycby0PpZHzKMuJmlMLs4Xl5l6T_e2UyzTvTdDlNOneFyyyuWlHl_i_-8ZSqu2QEBkq4qbxg/exec';
+
+/**
+ * Return the canonical web app base URL for email CTAs.
+ * Uses ScriptApp.getService().getUrl() to always return the URL of 
+ * the CURRENTLY EXECUTING deployment - no hardcoding needed.
+ * Falls back to WEB_APP_EXEC_URL script property or CANONICAL_WEB_APP_URL constant.
+ * @returns {string}
+ */
+function getEmailCtaBaseUrl_() {
+  try {
+    // Best: use the URL of the currently executing deployment
+    var url = ScriptApp.getService().getUrl();
+    if (url && url.indexOf('/exec') !== -1) {
+      Logger.log('[getEmailCtaBaseUrl_] Using ScriptApp URL: ' + url);
+      return url;
+    }
+  } catch (e) {
+    Logger.log('[getEmailCtaBaseUrl_] ScriptApp.getService().getUrl() failed: ' + e);
+  }
+  
+  // Fallback: script property
+  try {
+    var props = PropertiesService.getScriptProperties();
+    var propUrl = props.getProperty('WEB_APP_EXEC_URL');
+    if (propUrl) {
+      Logger.log('[getEmailCtaBaseUrl_] Using WEB_APP_EXEC_URL property: ' + propUrl);
+      return propUrl;
+    }
+  } catch (e) {}
+  
+  // Last resort: hardcoded constant
+  Logger.log('[getEmailCtaBaseUrl_] Using CANONICAL_WEB_APP_URL constant');
+  return CANONICAL_WEB_APP_URL;
+}
 
 /**
  * Get all configuration values
@@ -105,6 +149,31 @@ function setHmacSecret_(secret) {
 function setWebAppExecUrl_(url) {
   var props = PropertiesService.getScriptProperties();
   props.setProperty('WEB_APP_EXEC_URL', String(url || '').trim());
+}
+
+/**
+ * One-time admin setup to pin the active web app exec URL in Script Properties.
+ * Run manually from Apps Script editor: SET_WEBAPP_EXEC_URL()
+ * @returns {string} The configured URL
+ */
+function SET_WEBAPP_EXEC_URL() {
+  var props = PropertiesService.getScriptProperties();
+  props.setProperty('WEB_APP_EXEC_URL', WEB_APP_EXEC_URL_TARGET);
+  Logger.log('WEB_APP_EXEC_URL set to: ' + WEB_APP_EXEC_URL_TARGET);
+  return WEB_APP_EXEC_URL_TARGET;
+}
+
+/**
+ * Admin fix helper to force WEB_APP_EXEC_URL and log the resolved final URL.
+ * Run manually from Apps Script editor: FIX_SET_WEB_APP_EXEC_URL()
+ * @returns {string} Final URL from getWebAppUrl_()
+ */
+function FIX_SET_WEB_APP_EXEC_URL() {
+  var props = PropertiesService.getScriptProperties();
+  props.setProperty('WEB_APP_EXEC_URL', WEB_APP_EXEC_URL_TARGET);
+  var finalUrl = getWebAppUrl_();
+  Logger.log('FIX_SET_WEB_APP_EXEC_URL -> WEB_APP_EXEC_URL: ' + finalUrl);
+  return finalUrl;
 }
 
 /**
