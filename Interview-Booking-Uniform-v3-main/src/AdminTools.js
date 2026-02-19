@@ -51,7 +51,7 @@ function setupWebApp() {
   
   // Step 2: Set the web app URL to the known deployment
   Logger.log('Step 2: Setting web app URL...');
-  var webAppUrl = 'https://script.google.com/macros/s/AKfycbz5YyCDdmGnKZaMyv47Xu6MWVy6JhU7_R3yLtBePkYP131iIrIp1ptX0l5hJipUVtL4RA/exec';
+  var webAppUrl = 'https://script.google.com/macros/s/AKfycbx-IEEieMEvXPf0cXC_R_y6KKtWOMkA2nXJkU1mu8XlIMY7MnCn5eamrzjzvre0frZm0Q/exec';
   try {
     var props = PropertiesService.getScriptProperties();
     props.setProperty('WEB_APP_EXEC_URL', webAppUrl);
@@ -211,7 +211,10 @@ function runSidewaysForBrand(brand, opts) {
   opts = opts || {};
 
   var b = String(brand || '').toUpperCase().trim();
-  if (!b) return { ok: false, error: 'brand is required (e.g. ROYAL)' };
+  if (!b) {
+    Logger.log('ERROR: brand is required. Use runSideways_ROYAL(), runSideways_COSTA(), or runSideways_SEACHEFS() instead.');
+    return { ok: false, error: 'brand is required (e.g. ROYAL)' };
+  }
 
   var dryRun = (opts.dryRun === undefined) ? true : !!opts.dryRun;
   var testEmail = opts.testEmail || null;
@@ -219,6 +222,9 @@ function runSidewaysForBrand(brand, opts) {
   if (dryRun && !testEmail) testEmail = 'info@crewlifeatsea.com';
 
   var workerOpts = { brand: b, dryRun: dryRun, testEmail: testEmail };
+  if (opts.updateSheet !== undefined && opts.updateSheet !== null) {
+    workerOpts.updateSheet = !!opts.updateSheet;
+  }
   if (opts.limit !== undefined && opts.limit !== null && opts.limit !== '') {
     workerOpts.limit = Number(opts.limit);
   }
@@ -231,13 +237,44 @@ function runSidewaysForBrand(brand, opts) {
 
 // Convenience helpers for quick testing from the Apps Script UI
 function runSideways_ROYAL() {
-  return runSidewaysForBrand('ROYAL', { dryRun: true, testEmail: 'info@crewlifeatsea.com' });
+  return runSidewaysForBrand('ROYAL', { dryRun: true, testEmail: 'info@crewlifeatsea.com', updateSheet: true });
 }
 
+/**
+ * DIAGNOSTIC: Dump all column IDs and titles for a brand's Smartsheet.
+ * Run this from the editor to find the exact column IDs you need.
+ * Usage: dumpSheetColumns_ROYAL()  or  dumpSheetColumns('ROYAL')
+ */
+function dumpSheetColumns(brand) {
+  var b = getBrand_(String(brand || '').toUpperCase());
+  if (!b) { Logger.log('Unknown brand: ' + brand); return; }
+  var cfg = getConfig_();
+  var apiToken = cfg.SMARTSHEET_API_TOKEN;
+  if (!apiToken) { Logger.log('No SMARTSHEET_API_TOKEN'); return; }
+  var sheetId = b.smartsheetId;
+  Logger.log('=== Columns for ' + brand + ' sheet ' + sheetId + ' ===');
+  var sheetData = fetchSmartsheet_(sheetId, apiToken);
+  if (!sheetData.ok) { Logger.log('Fetch failed: ' + sheetData.error); return; }
+  var cols = sheetData.columns || [];
+  for (var i = 0; i < cols.length; i++) {
+    var c = cols[i];
+    var info = 'COL[' + i + ']  id: ' + c.id + '  title: "' + c.title + '"';
+    if (c.formula) info += '  [HAS FORMULA]';
+    if (c.type) info += '  type: ' + c.type;
+    Logger.log(info);
+  }
+  Logger.log('=== Total: ' + cols.length + ' columns ===');
+  return cols.length;
+}
+
+function dumpSheetColumns_ROYAL() { return dumpSheetColumns('ROYAL'); }
+function dumpSheetColumns_COSTA() { return dumpSheetColumns('COSTA'); }
+function dumpSheetColumns_SEACHEFS() { return dumpSheetColumns('SEACHEFS'); }
+
 function runSideways_COSTA() {
-  return runSidewaysForBrand('COSTA', { dryRun: true, testEmail: 'info@crewlifeatsea.com' });
+  return runSidewaysForBrand('COSTA', { dryRun: true, testEmail: 'info@crewlifeatsea.com', updateSheet: true });
 }
 
 function runSideways_SEACHEFS() {
-  return runSidewaysForBrand('SEACHEFS', { dryRun: true, testEmail: 'info@crewlifeatsea.com' });
+  return runSidewaysForBrand('SEACHEFS', { dryRun: true, testEmail: 'info@crewlifeatsea.com', updateSheet: true });
 }

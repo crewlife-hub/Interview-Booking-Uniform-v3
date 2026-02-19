@@ -8,7 +8,7 @@ var APP_VERSION = '1.0.0';
 var CONFIG_SHEET_ID = '1qM3ZEdBsvbEofDH8DayRWcRa4bUcrKQIv8kzKSYZ1AM';
 // Default exec URL — replaceable via Script Properties `WEB_APP_EXEC_URL` or `DEPLOY_ID`
 var WEB_APP_EXEC_URL_DEFAULT = 'https://script.google.com/macros/s/AKfycbzL1GZHA4DoMNhDT5-6LuYlXw2YPyYZI444dJFOHvrUtPXZorO4P7Sx1i8-Qe1bKKmxPQ/exec';
-var WEB_APP_EXEC_URL_TARGET = 'https://script.google.com/a/macros/seainfogroup.com/s/AKfycbx-IEEieMEvXPf0cXC_R_y6KKtWOMkA2nXJkU1mu8XlIMY7MnCn5eamrzjzvre0frZm0Q/exec';
+var WEB_APP_EXEC_URL_TARGET = 'https://script.google.com/macros/s/AKfycbx-IEEieMEvXPf0cXC_R_y6KKtWOMkA2nXJkU1mu8XlIMY7MnCn5eamrzjzvre0frZm0Q/exec';
 
 /**
  * CANONICAL web app URL used for ALL email CTAs.
@@ -17,7 +17,7 @@ var WEB_APP_EXEC_URL_TARGET = 'https://script.google.com/a/macros/seainfogroup.c
  * the link is always the correct /exec endpoint regardless of script properties.
  * Deployment @104 - Feb 19 2026 - FINAL CTA FIX.
  */
-var CANONICAL_WEB_APP_URL = 'https://script.google.com/a/macros/seainfogroup.com/s/AKfycbx-IEEieMEvXPf0cXC_R_y6KKtWOMkA2nXJkU1mu8XlIMY7MnCn5eamrzjzvre0frZm0Q/exec';
+var CANONICAL_WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbx-IEEieMEvXPf0cXC_R_y6KKtWOMkA2nXJkU1mu8XlIMY7MnCn5eamrzjzvre0frZm0Q/exec';
 
 /**
  * Return the canonical web app base URL for email CTAs.
@@ -27,18 +27,7 @@ var CANONICAL_WEB_APP_URL = 'https://script.google.com/a/macros/seainfogroup.com
  * @returns {string}
  */
 function getEmailCtaBaseUrl_() {
-  try {
-    // Best: use the URL of the currently executing deployment
-    var url = ScriptApp.getService().getUrl();
-    if (url && url.indexOf('/exec') !== -1) {
-      Logger.log('[getEmailCtaBaseUrl_] Using ScriptApp URL: ' + url);
-      return url;
-    }
-  } catch (e) {
-    Logger.log('[getEmailCtaBaseUrl_] ScriptApp.getService().getUrl() failed: ' + e);
-  }
-  
-  // Fallback: script property
+  // Prefer explicit configured URL so email CTA is EXACTLY the expected /exec URL.
   try {
     var props = PropertiesService.getScriptProperties();
     var propUrl = props.getProperty('WEB_APP_EXEC_URL');

@@ -246,3 +246,22 @@ function verifyBookingUrl_(url) {
     return { ok: false, error: String(e) };
   }
 }
+
+/**
+ * Basic absolute URL validator.
+ * Used for Smartsheet fields like "Position Link".
+ */
+function isValidUrl_(url) {
+  if (!url) return false;
+  try {
+    var s = String(url).trim();
+    if (!s) return false;
+    if (s.indexOf('http://') !== 0 && s.indexOf('https://') !== 0) return false;
+    if (s.indexOf(' ') !== -1) return false;
+    // avoid obviously broken URLs
+    if (s.length < 10) return false;
+    return true;
+  } catch (e) {
+    return false;
+  }
+}

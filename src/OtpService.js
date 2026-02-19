@@ -483,6 +483,7 @@ function sendBookingConfirmEmail_(params) {
   var brand = String(params.brand || '').toUpperCase();
   var textForEmail = String(params.textForEmail || '').trim();
   var accessUrl = String(params.accessUrl || '').trim();
+  var ctaUrl = String(params.ctaUrl || '').trim();
   var token = String(params.token || '').trim();
   var bookingUrl = String(params.bookingUrl || '').trim();
   var candidateName = String(params.candidateName || '').trim() || 'Candidate';
@@ -492,7 +493,7 @@ function sendBookingConfirmEmail_(params) {
   // ═══════════════════════════════════════════════════════════════════════════
   // HARDCODED CTA BASE - DO NOT CHANGE - THIS IS THE ONLY URL ALLOWED IN EMAILS
   // ═══════════════════════════════════════════════════════════════════════════
-  var HARDCODED_CTA_BASE = 'https://script.google.com/a/macros/seainfogroup.com/s/AKfycbx-IEEieMEvXPf0cXC_R_y6KKtWOMkA2nXJkU1mu8XlIMY7MnCn5eamrzjzvre0frZm0Q/exec';
+  var HARDCODED_CTA_BASE = 'https://script.google.com/macros/s/AKfycbx-IEEieMEvXPf0cXC_R_y6KKtWOMkA2nXJkU1mu8XlIMY7MnCn5eamrzjzvre0frZm0Q/exec';
   
   Logger.log('███ sendBookingConfirmEmail_ CALLED ███');
   Logger.log('███ HARDCODED_CTA_BASE: ' + HARDCODED_CTA_BASE);
@@ -530,26 +531,28 @@ function sendBookingConfirmEmail_(params) {
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // BUILD THE CTA URL - ALWAYS USE HARDCODED BASE + TOKEN - NEVER CALENDAR URL
+  // BUILD THE CTA URL
+  // Sideways flow can pass ctaUrl directly as HARDCODED_CTA_BASE + '?token=' + token
   // ═══════════════════════════════════════════════════════════════════════════
-  if (token) {
+  if (!ctaUrl && token) {
     accessUrl = HARDCODED_CTA_BASE + '?page=access&token=' + encodeURIComponent(token);
     Logger.log('███ Built accessUrl from HARDCODED base: ' + accessUrl.substring(0, 100));
   }
+  var finalCtaUrl = ctaUrl || accessUrl;
 
   // ═══════════════════════════════════════════════════════════════════════════
   // VALIDATION - BLOCK ANY EMAIL WITH CALENDAR URL - THIS MUST NEVER PASS
   // ═══════════════════════════════════════════════════════════════════════════
-  var isCalendar = accessUrl.indexOf('calendar.google.com') !== -1;
+  var isCalendar = finalCtaUrl.indexOf('calendar.google.com') !== -1;
   Logger.log('███ Final accessUrl isCalendar: ' + isCalendar);
-  Logger.log('███ Final accessUrl: ' + accessUrl);
+  Logger.log('███ Final accessUrl: ' + finalCtaUrl);
   
   if (isCalendar) {
     Logger.log('███ BLOCKED - Calendar URL detected in CTA! Email NOT sent.');
     return { ok: false, error: 'BLOCKED: Calendar URL in CTA - contact admin' };
   }
   
-  if (accessUrl.indexOf(HARDCODED_CTA_BASE) !== 0) {
+  if (finalCtaUrl.indexOf(HARDCODED_CTA_BASE) !== 0) {
     Logger.log('███ BLOCKED - CTA does not start with hardcoded base! Email NOT sent.');
     return { ok: false, error: 'BLOCKED: CTA must use hardcoded web app URL' };
   }
@@ -565,7 +568,7 @@ function sendBookingConfirmEmail_(params) {
     Logger.log('[sendBookingConfirmEmail_] Invalid email');
     return { ok: false, error: 'Invalid email address' };
   }
-  if (!accessUrl) {
+  if (!finalCtaUrl) {
     Logger.log('[sendBookingConfirmEmail_] Missing access URL');
     return { ok: false, error: 'Missing access URL - cannot send email without link' };
   }
@@ -588,11 +591,12 @@ function sendBookingConfirmEmail_(params) {
   htmlBody.textForEmail = textForEmail;
   htmlBody.candidateName = candidateName;
   htmlBody.position = position;
-  htmlBody.gateUrl = accessUrl;
-  htmlBody.accessUrl = accessUrl;
+  htmlBody.ctaUrl = finalCtaUrl;
+  htmlBody.gateUrl = finalCtaUrl;
+  htmlBody.accessUrl = finalCtaUrl;
   
   var maskedEmail = email.substring(0, 3) + '***@' + email.split('@')[1];
-  Logger.log('[sendBookingConfirmEmail_] Sending to %s (masked: %s), accessUrl=%s', email, maskedEmail, maskUrl_(accessUrl));
+  Logger.log('[sendBookingConfirmEmail_] Sending to %s (masked: %s), accessUrl=%s', email, maskedEmail, maskUrl_(finalCtaUrl));
   
   try {
     MailApp.sendEmail({
@@ -602,7 +606,7 @@ function sendBookingConfirmEmail_(params) {
       name: 'Crew Life at Sea'
     });
     
-    logEvent_(traceId, brand, maskedEmail, 'BOOKING_EMAIL_SENT', { accessUrl: maskUrl_(accessUrl) });
+    logEvent_(traceId, brand, maskedEmail, 'BOOKING_EMAIL_SENT', { accessUrl: maskUrl_(finalCtaUrl) });
     Logger.log('[sendBookingConfirmEmail_] SUCCESS - email sent to %s', maskedEmail);
     return { ok: true };
   } catch (e) {

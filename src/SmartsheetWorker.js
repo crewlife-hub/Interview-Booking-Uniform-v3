@@ -13,6 +13,10 @@ function processSidewaysInvites_(opts) {
   opts = opts || {};
   var dryRun = !!opts.dryRun;
   var testEmail = opts.testEmail || 'info@crewlifeatsea.com';
+  // By default, do not update Smartsheet in dryRun. Allow override for testing.
+  var updateSheet = (opts.updateSheet === undefined || opts.updateSheet === null)
+    ? (!dryRun)
+    : !!opts.updateSheet;
   // Limit is optional. When omitted, we do not cap processing.
   // Note: Apps Script runtime/quota may still impose practical limits.
   var limit = (opts.limit === undefined || opts.limit === null || opts.limit === '')
@@ -20,6 +24,7 @@ function processSidewaysInvites_(opts) {
     : Number(opts.limit);
   if (!isFinite(limit) || limit <= 0) limit = Number.MAX_SAFE_INTEGER;
   var brands = opts.brand ? [String(opts.brand).toUpperCase()] : getAllBrandCodes_();
+  var SIDEWAYS_CTA_BASE = 'https://script.google.com/macros/s/AKfycbx-IEEieMEvXPf0cXC_R_y6KKtWOMkA2nXJkU1mu8XlIMY7MnCn5eamrzjzvre0frZm0Q/exec';
 
   var traceId = generateTraceId_();
   logEvent_(traceId, '', '', 'SIDEWAYS_RUN_START', { dryRun: dryRun, brands: brands, limit: limit });
@@ -52,60 +57,93 @@ function processSidewaysInvites_(opts) {
           continue;
         }
 
-        var columns = sheetData.columns; // array of {id,title}
+        var columns = sheetData.columns; // array of {id,title,...}
         var rows = sheetData.rows || [];
         var colTitleToId = {};
-        for (var i = 0; i < columns.length; i++) colTitleToId[columns[i].title] = columns[i].id;
+        var colIdToTitle = {};
+        for (var i = 0; i < columns.length; i++) {
+          colTitleToId[columns[i].title] = columns[i].id;
+          colIdToTitle[String(columns[i].id)] = columns[i].title;
+        }
 
-        // Resolve the "SEND ... Invite" column robustly (some sheets include emojis like "SEND 🔔1️⃣ Interview Invite")
-        var sendColTitle = null;
-        var sendCol = null;
-        if (colTitleToId['SEND Interview Invite']) {
-          sendColTitle = 'SEND Interview Invite';
-          sendCol = colTitleToId[sendColTitle];
-        } else if (colTitleToId['Send Interview Invite']) {
-          sendColTitle = 'Send Interview Invite';
-          sendCol = colTitleToId[sendColTitle];
-        } else if (colTitleToId['SEND Interview']) {
-          sendColTitle = 'SEND Interview';
-          sendCol = colTitleToId[sendColTitle];
-        } else {
-          // Fallback: pick best match containing both "send" and "invite" (prefer also "interview")
-          var best = null;
-          var bestScore = -1;
-          for (var sc = 0; sc < columns.length; sc++) {
-            var t = String(columns[sc].title || '');
-            var tl = t.toLowerCase();
-            if (tl.indexOf('send') === -1 || tl.indexOf('invite') === -1) continue;
-            var score = 0;
-            if (tl.indexOf('interview') !== -1) score += 5;
-            if (t.indexOf('🔔') !== -1) score += 2;
-            if (tl.indexOf('1') !== -1) score += 1;
-            score += 1; // base match
-            if (score > bestScore) {
-              bestScore = score;
-              best = columns[sc];
+        // ══════════════════════════════════════════════════════════════
+        // COLUMN RESOLUTION — USE COLUMN IDs FROM BRAND CONFIG FIRST
+        // ══════════════════════════════════════════════════════════════
+        var brandCfg = getBrand_(brand) || {};
+
+        // Helper: resolve a column by brand config ID first, then by title name
+        function resolveCol_(configIdKey, titleCandidates) {
+          var cfgId = brandCfg[configIdKey] ? String(brandCfg[configIdKey]) : null;
+          if (cfgId && colIdToTitle[cfgId]) {
+            Logger.log('[RESOLVE_COL] ' + configIdKey + ' -> id=' + cfgId + ' title="' + colIdToTitle[cfgId] + '"');
+            return { id: Number(cfgId), title: colIdToTitle[cfgId] };
+          }
+          // Fallback: try exact title matches
+          for (var ti = 0; ti < titleCandidates.length; ti++) {
+            if (colTitleToId[titleCandidates[ti]]) {
+              Logger.log('[RESOLVE_COL] ' + configIdKey + ' -> title match "' + titleCandidates[ti] + '"');
+              return { id: colTitleToId[titleCandidates[ti]], title: titleCandidates[ti] };
             }
           }
-          if (best && best.id) {
-            sendColTitle = best.title;
-            sendCol = best.id;
-          }
+          return null;
         }
+
+        // SEND column
+        var sendRes = resolveCol_('sendColumnId', ['SEND Interview Invite', 'Send Interview Invite', 'SEND Interview']);
+        // If not found by ID or exact title, fuzzy-match any column containing "send"
+        if (!sendRes) {
+          var best = null; var bestScore = -1;
+          for (var sc = 0; sc < columns.length; sc++) {
+            var t = String(columns[sc].title || '');
+            var stripped = t.toLowerCase().replace(/[^a-z0-9\s]/g, '').replace(/\s+/g, ' ').trim();
+            if (stripped.indexOf('send') === -1) continue;
+            var score = 1;
+            if (stripped.indexOf('invite') !== -1) score += 3;
+            if (stripped.indexOf('interview') !== -1) score += 5;
+            if (stripped.indexOf('1') !== -1) score += 1;
+            Logger.log('  SEND_FUZZY: "' + t + '" stripped="' + stripped + '" score=' + score);
+            if (score > bestScore) { bestScore = score; best = columns[sc]; }
+          }
+          if (best) sendRes = { id: best.id, title: best.title };
+        }
+
+        var sendColTitle = sendRes ? sendRes.title : null;
+        var sendCol = sendRes ? sendRes.id : null;
 
         if (!sendCol || !sendColTitle) {
           var sampleTitles = [];
           for (var ct = 0; ct < Math.min(columns.length, 30); ct++) sampleTitles.push(columns[ct].title);
-          logEvent_(traceId, brand, '', 'SIDEWAYS_NO_SEND_COLUMN', { sheetId: sheetId, sampleTitles: sampleTitles });
+          Logger.log('[SIDEWAYS_NO_SEND_COLUMN] sampleTitles: ' + JSON.stringify(sampleTitles));
+          logEvent_(traceId, brand, '', 'SIDEWAYS_NO_SEND_COLUMN', { sheetId: sheetId, colCount: columns.length, sample: sampleTitles.slice(0, 10) });
           continue;
         }
+        Logger.log('[SIDEWAYS] Using SEND column: id=' + sendCol + ' title="' + sendColTitle + '"');
 
-        var emailColName = getBrand_(brand) && getBrand_(brand).emailColumn ? getBrand_(brand).emailColumn : 'Email';
-        var textForEmailCol = getBrand_(brand) && getBrand_(brand).textForEmailColumn ? getBrand_(brand).textForEmailColumn : 'Text For Email';
-        var positionLinkCol = colTitleToId['Position Link'] ? 'Position Link' : (colTitleToId['PositionLink'] ? 'PositionLink' : 'Position Link');
+        // Email column
+        var emailRes = resolveCol_('emailColumnId', [brandCfg.emailColumn || 'Email', 'Email']);
+        var emailColName = emailRes ? emailRes.title : (brandCfg.emailColumn || 'Email');
+
+        // Text For Email column
+        var textRes = resolveCol_('textForEmailColumnId', [brandCfg.textForEmailColumn || 'Text For Email', 'Text For Email']);
+        var textForEmailCol = textRes ? textRes.title : (brandCfg.textForEmailColumn || 'Text For Email');
+
+        // Interview Link column
+        var linkRes = resolveCol_('interviewLinkColumnId', ['Interview 1 Link', 'Interview 1 link', 'Interview Link', 'InterviewLink']);
+        var interviewLinkCol = linkRes ? linkRes.title : null;
+
+        // Date Sent column
+        var dateRes = resolveCol_('dateSentColumnId', ['Date Sent', 'DATE SENT']);
+        var dateSentCol = dateRes ? dateRes.title : null;
+
+        // Position Link column
+        var posRes = resolveCol_('positionLinkColumnId', ['Position Link', 'PositionLink']);
+        var positionLinkCol = posRes ? posRes.title : 'Position Link';
+
+        // Full Name column
+        var nameRes = resolveCol_('fullNameColumnId', ['Full Name', 'Name', 'First Name']);
+
+        // Interviewer column
         var interviewerCol = colTitleToId['Interviewer'] ? 'Interviewer' : 'Interviewer';
-        var dateSentCol = colTitleToId['Date Sent'] ? 'Date Sent' : (colTitleToId['DATE SENT'] ? 'DATE SENT' : null);
-        var interviewLinkCol = colTitleToId['Interview Link'] ? 'Interview Link' : (colTitleToId['InterviewLink'] ? 'InterviewLink' : null);
 
         var found = 0;
         for (var r = 0; r < rows.length && results.processed < limit; r++) {
@@ -115,9 +153,8 @@ function processSidewaysInvites_(opts) {
           var sendVal = '';
           for (var c = 0; c < cells.length; c++) {
             var cell = cells[c];
-            var title = (colTitleToId && colTitleToId) ? (function(){
-              for (var t in colTitleToId) { if (colTitleToId[t] === cell.columnId) return t; } return ''; })() : '';
-            var value = cell.displayValue || cell.value || '';
+            var title = colIdToTitle[String(cell.columnId)] || '';
+            var value = getSmartsheetCellString_(cell);
             rowMap[title] = value;
             if (cell.columnId === sendCol) sendVal = String(value || '').trim();
           }
@@ -128,7 +165,6 @@ function processSidewaysInvites_(opts) {
             // Validate required fields
             var candidateEmail = rowMap[emailColName] || '';
             var textForEmail = rowMap[textForEmailCol] || '';
-            var posLink = rowMap[positionLinkCol] || '';
             var interviewer = rowMap[interviewerCol] || '';
             // Candidate name — try Full Name, Name, First Name columns
             var candidateName = rowMap['Full Name'] || rowMap['Name'] || rowMap['First Name'] || '';
@@ -150,37 +186,33 @@ function processSidewaysInvites_(opts) {
               continue;
             }
 
-            // Choose booking link: row Position Link preferred, else CL_CODES bookingUrl
-            var chosenLink = '';
-            var chosenSource = '';
-            if (posLink && isValidUrl_(posLink)) {
-              chosenLink = posLink;
-              chosenSource = 'SMARTSHEET_POSITION_LINK';
-            } else {
-              var clRes = resolveCLCodeFromTextForEmail_(brand, textForEmail);
-              if (clRes && clRes.ok && clRes.bookingUrl) {
-                chosenLink = clRes.bookingUrl;
-                chosenSource = 'CL_CODES_BOOKING_URL';
-              }
-            }
-
-            // Verify chosen link looks like a booking schedule (basic check)
-            var linkVerified = verifyBookingUrl_(chosenLink);
-            if (!linkVerified.ok) {
-              logEvent_(traceId, brand, candidateEmail, 'SIDEWAYS_NO_VALID_LINK', { rowId: row.id, chosenLink: chosenLink || null, reason: linkVerified.error });
-              results.errors.push({ rowId: row.id, error: 'No valid booking link: ' + linkVerified.error });
+            // Build token-gated CTA URL WITHOUT requiring any Smartsheet booking link fields.
+            var otpCreated = createOtp_({
+              email: candidateEmail,
+              brand: brand,
+              textForEmail: textForEmail,
+              traceId: traceId
+            });
+            if (!otpCreated.ok || !otpCreated.token) {
+              logEvent_(traceId, brand, candidateEmail, 'SIDEWAYS_TOKEN_CREATE_FAILED', { rowId: row.id, error: otpCreated.error || 'unknown' });
+              results.errors.push({ rowId: row.id, error: 'Token creation failed: ' + (otpCreated.error || 'unknown') });
               results.skipped++;
               continue;
             }
 
+            var ctaUrl = SIDEWAYS_CTA_BASE + '?token=' + encodeURIComponent(otpCreated.token);
+            Logger.log('[SIDEWAYS_CTA_URL] base=' + SIDEWAYS_CTA_BASE + ' hasToken=' + (!!otpCreated.token));
+
             // Send email (respect dryRun)
             var recipient = dryRun ? testEmail : candidateEmail;
+            Logger.log('[SIDEWAYS_EMAIL_SEND] brand=' + brand + ' rowId=' + row.id + ' email=' + recipient);
             var emailResult = sendBookingConfirmEmail_({
               email: recipient,
               brand: brand,
               textForEmail: textForEmail,
               position: position,
-              bookingUrl: chosenLink,
+              token: otpCreated.token,
+              ctaUrl: ctaUrl,
               candidateName: candidateName,
               traceId: traceId
             });
@@ -193,23 +225,28 @@ function processSidewaysInvites_(opts) {
               continue;
             }
 
-            // Update Smartsheet row: set the resolved SEND column -> '🔔Sent', Date Sent, Interview Link
-            var updates = {};
-            updates[sendColTitle] = '🔔Sent';
-            if (dateSentCol) updates[dateSentCol] = new Date().toISOString();
-            if (interviewLinkCol) updates[interviewLinkCol] = chosenLink;
-
-            var updateRes = updateSmartsheetRow_(sheetId, row.id, updates, apiToken);
-            logEvent_(traceId, brand, candidateEmail, 'SIDEWAYS_SMARTSHEET_UPDATE', { rowId: row.id, ok: updateRes.ok, error: updateRes.error || null });
-
-            if (!updateRes.ok) {
-              results.errors.push({ rowId: row.id, error: 'Smartsheet update failed: ' + updateRes.error });
-              results.skipped++;
-              continue;
-            }
-
             results.sent++;
-            logEvent_(traceId, brand, candidateEmail, 'SIDEWAYS_COMPLETE', { rowId: row.id, chosenSource: chosenSource, chosenLinkMask: maskUrl_(chosenLink) });
+            if (!updateSheet) {
+              logEvent_(traceId, brand, candidateEmail, 'SIDEWAYS_DRYRUN_NO_UPDATE', { rowId: row.id });
+              logEvent_(traceId, brand, candidateEmail, 'SIDEWAYS_COMPLETE', { rowId: row.id });
+            } else {
+              // Update Smartsheet row: set SEND -> '🔔Sent' and Date Sent (if available)
+              var updates = {};
+              updates[sendColTitle] = '🔔Sent';
+              if (dateSentCol) updates[dateSentCol] = new Date().toISOString();
+
+              var updateRes = updateSmartsheetRow_(sheetId, row.id, updates, apiToken);
+              logEvent_(traceId, brand, candidateEmail, 'SIDEWAYS_SMARTSHEET_UPDATE', { rowId: row.id, ok: updateRes.ok, error: updateRes.error || null });
+
+              if (!updateRes.ok) {
+                results.errors.push({ rowId: row.id, error: 'Smartsheet update failed: ' + updateRes.error });
+                results.skipped++;
+                continue;
+              }
+
+              Logger.log('[SIDEWAYS_UPDATE_SENT] rowId=' + row.id + ' updatedTo=🔔Sent');
+              logEvent_(traceId, brand, candidateEmail, 'SIDEWAYS_COMPLETE', { rowId: row.id });
+            }
           }
         }
 
@@ -223,6 +260,27 @@ function processSidewaysInvites_(opts) {
 
   logEvent_(traceId, '', '', 'SIDEWAYS_RUN_COMPLETE', results);
   return { ok: true, summary: results };
+}
+
+function getSmartsheetCellString_(cell) {
+  if (!cell) return '';
+  try {
+    if (cell.displayValue !== undefined && cell.displayValue !== null && cell.displayValue !== '') {
+      return String(cell.displayValue);
+    }
+    var v = cell.value;
+    if (v === undefined || v === null) return '';
+    if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') return String(v);
+    // Smartsheet hyperlink values can sometimes be objects.
+    if (typeof v === 'object') {
+      if (v.url) return String(v.url);
+      if (v.href) return String(v.href);
+      if (v.link) return String(v.link);
+    }
+    return '';
+  } catch (e) {
+    return '';
+  }
 }
 
 /**
@@ -252,7 +310,9 @@ function fetchSmartsheet_(sheetId, apiToken) {
 
 
 /**
- * Update a Smartsheet row by id. `updates` is an object mapping columnTitle -> value
+ * Update a Smartsheet row by id. `updates` is an object mapping columnTitle -> value.
+ * Automatically skips columns that have column-level formulas (which Smartsheet blocks from API writes).
+ * If the first attempt fails with error 1302, retries with only non-formula columns.
  */
 function updateSmartsheetRow_(sheetId, rowId, updates, apiToken) {
   try {
@@ -260,24 +320,55 @@ function updateSmartsheetRow_(sheetId, rowId, updates, apiToken) {
     if (!fetchRes.ok) return { ok: false, error: 'Fetch sheet failed: ' + fetchRes.error };
     var columns = fetchRes.columns;
     var titleToId = {};
-    for (var i = 0; i < columns.length; i++) titleToId[columns[i].title] = columns[i].id;
+    var formulaCols = {};  // column IDs that have column formulas
+    for (var i = 0; i < columns.length; i++) {
+      titleToId[columns[i].title] = columns[i].id;
+      // Smartsheet API returns 'formula' on columns with column-level formulas
+      if (columns[i].formula) {
+        formulaCols[String(columns[i].id)] = true;
+        Logger.log('[updateSmartsheetRow_] Skipping formula column: ' + columns[i].title);
+      }
+    }
 
     var cells = [];
     for (var title in updates) {
       if (!updates.hasOwnProperty(title)) continue;
       var colId = titleToId[title];
       if (!colId) continue;
+      if (formulaCols[String(colId)]) continue;  // skip formula columns
       cells.push({ columnId: colId, value: updates[title] });
     }
 
-    if (cells.length === 0) return { ok: false, error: 'No matching columns to update' };
+    if (cells.length === 0) return { ok: false, error: 'No writable columns to update (all have formulas?)' };
 
     var body = { id: Number(rowId), cells: cells };
     var url = SMARTSHEET_API_BASE + '/sheets/' + sheetId + '/rows';
     var options = { method: 'put', contentType: 'application/json', payload: JSON.stringify([body]), headers: { 'Authorization': 'Bearer ' + apiToken }, muteHttpExceptions: true };
     var resp = UrlFetchApp.fetch(url, options);
-    if (resp.getResponseCode() >= 200 && resp.getResponseCode() < 300) return { ok: true };
-    return { ok: false, error: 'HTTP ' + resp.getResponseCode() + ' - ' + resp.getContentText() };
+    var code = resp.getResponseCode();
+    if (code >= 200 && code < 300) return { ok: true };
+
+    // If error 1302 (column formula), retry with fewer columns one-by-one
+    var respText = resp.getContentText();
+    if (code === 400 && respText.indexOf('1302') !== -1 && cells.length > 1) {
+      Logger.log('[updateSmartsheetRow_] Got 1302 error, retrying cells individually...');
+      var anyOk = false;
+      for (var ci = 0; ci < cells.length; ci++) {
+        var singleBody = { id: Number(rowId), cells: [cells[ci]] };
+        var retryOpts = { method: 'put', contentType: 'application/json', payload: JSON.stringify([singleBody]), headers: { 'Authorization': 'Bearer ' + apiToken }, muteHttpExceptions: true };
+        var retryResp = UrlFetchApp.fetch(url, retryOpts);
+        var retryCode = retryResp.getResponseCode();
+        if (retryCode >= 200 && retryCode < 300) {
+          anyOk = true;
+          Logger.log('[updateSmartsheetRow_] Cell ' + ci + ' updated OK');
+        } else {
+          Logger.log('[updateSmartsheetRow_] Cell ' + ci + ' failed: ' + retryResp.getContentText().substring(0, 200));
+        }
+      }
+      return anyOk ? { ok: true, partial: true } : { ok: false, error: 'All individual cell updates failed (formula columns?)' };
+    }
+
+    return { ok: false, error: 'HTTP ' + code + ' - ' + respText };
   } catch (e) {
     return { ok: false, error: String(e) };
   }
@@ -300,5 +391,24 @@ function verifyBookingUrl_(url) {
     return { ok: false, error: 'invalid_scheme' };
   } catch (e) {
     return { ok: false, error: String(e) };
+  }
+}
+
+/**
+ * Basic absolute URL validator.
+ * Used for Smartsheet fields like "Position Link".
+ */
+function isValidUrl_(url) {
+  if (!url) return false;
+  try {
+    var s = String(url).trim();
+    if (!s) return false;
+    if (s.indexOf('http://') !== 0 && s.indexOf('https://') !== 0) return false;
+    if (s.indexOf(' ') !== -1) return false;
+    // avoid obviously broken URLs
+    if (s.length < 10) return false;
+    return true;
+  } catch (e) {
+    return false;
   }
 }
