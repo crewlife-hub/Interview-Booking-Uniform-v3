@@ -209,7 +209,8 @@ function confirmTokenAndMarkUsed_(token, traceId) {
   sheet.getRange(validation.rowIndex, usedAtIdx + 1).setValue(new Date());
   // Mark as LOCKED in column AB (28)
   sheet.getRange(validation.rowIndex, 28).setValue('LOCKED');
-  Logger.log('[INVITE_LOCK] row=%s set LOCKED (AB)', validation.rowIndex);
+  SpreadsheetApp.flush();
+  Logger.log('[INVITE_LOCK] row=%s set LOCKED (AB) — flushed', validation.rowIndex);
   
   logEvent_(traceId, validation.brand, '', 'TOKEN_USED', {
     token: token.substring(0, 8) + '...',
@@ -546,14 +547,15 @@ function consumeTokenForRedirect_(token, traceId) {
       Logger.log('[REDIRECT_WARN] URL may still trigger Google login - check calendar settings');
     }
 
-    // === ATOMIC: Mark USED + set Used At BEFORE returning booking URL ===
+    // === ATOMIC: Mark USED + set Used At + LOCKED BEFORE returning booking URL ===
     sheet.getRange(sheetRow, idx['Status'] + 1).setValue('USED');
     if (idx['Used At'] !== undefined) {
       sheet.getRange(sheetRow, idx['Used At'] + 1).setValue(new Date());
     }
     // Mark as LOCKED in column AB (28)
     sheet.getRange(sheetRow, 28).setValue('LOCKED');
-    Logger.log('[INVITE_LOCK] row=%s set LOCKED (AB)', sheetRow);
+    SpreadsheetApp.flush();   // force all three writes to commit before lock releases
+    Logger.log('[INVITE_LOCK] row=%s set LOCKED (AB) — flushed', sheetRow);
 
     logEvent_(traceId, brand, '', 'TOKEN_CONSUMED', {
       token: token.substring(0, 8) + '...',
