@@ -207,10 +207,15 @@ function confirmTokenAndMarkUsed_(token, traceId) {
   // Mark as USED
   sheet.getRange(validation.rowIndex, statusIdx + 1).setValue(TOKEN_STATUS.USED);
   sheet.getRange(validation.rowIndex, usedAtIdx + 1).setValue(new Date());
-  // Mark as LOCKED in column AB (28)
-  sheet.getRange(validation.rowIndex, 28).setValue('LOCKED');
+  // Mark as LOCKED via HeaderFixer lockRow_ (finds Locked column dynamically)
+  try {
+    lockRow_(sheet, validation.rowIndex);
+  } catch (lockErr) {
+    Logger.log('[INVITE_LOCK_ERROR] lockRow_ failed, falling back to col 28: %s', lockErr);
+    sheet.getRange(validation.rowIndex, 28).setValue('LOCKED');
+  }
   SpreadsheetApp.flush();
-  Logger.log('[INVITE_LOCK] row=%s set LOCKED (AB) — flushed', validation.rowIndex);
+  Logger.log('[INVITE_LOCK] row=%s LOCKED — flushed', validation.rowIndex);
   
   logEvent_(traceId, validation.brand, '', 'TOKEN_USED', {
     token: token.substring(0, 8) + '...',
@@ -552,10 +557,15 @@ function consumeTokenForRedirect_(token, traceId) {
     if (idx['Used At'] !== undefined) {
       sheet.getRange(sheetRow, idx['Used At'] + 1).setValue(new Date());
     }
-    // Mark as LOCKED in column AB (28)
-    sheet.getRange(sheetRow, 28).setValue('LOCKED');
-    SpreadsheetApp.flush();   // force all three writes to commit before lock releases
-    Logger.log('[INVITE_LOCK] row=%s set LOCKED (AB) — flushed', sheetRow);
+    // Mark as LOCKED via HeaderFixer lockRow_ (finds Locked column dynamically)
+    try {
+      lockRow_(sheet, sheetRow);
+    } catch (lockErr) {
+      Logger.log('[INVITE_LOCK_ERROR] lockRow_ failed, falling back to col 28: %s', lockErr);
+      sheet.getRange(sheetRow, 28).setValue('LOCKED');
+    }
+    SpreadsheetApp.flush();   // force all writes to commit before lock releases
+    Logger.log('[INVITE_LOCK] row=%s LOCKED — flushed', sheetRow);
 
     logEvent_(traceId, brand, '', 'TOKEN_CONSUMED', {
       token: token.substring(0, 8) + '...',
