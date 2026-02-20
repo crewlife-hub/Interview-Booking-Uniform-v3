@@ -150,3 +150,82 @@ function maskUrl_(url) {
     return 'masked';
   }
 }
+
+/**
+ * Validate that a URL is a valid Google Calendar Appointment Schedule booking link.
+ * Valid formats:
+ *   https://calendar.google.com/calendar/u/0/appointments/schedules/...
+ *   https://calendar.google.com/calendar/appointments/schedules/...
+ * Invalid formats:
+ *   calendar.app.google short links
+ *   /r/appointments/ owner/management URLs
+ *   Confirmation or event links
+ * @param {string} url - URL to validate
+ * @returns {Object} { valid: boolean, reason: string }
+ */
+function isValidAppointmentScheduleUrl_(url) {
+  if (!url) {
+    return { valid: false, reason: 'URL is empty' };
+  }
+  var u = String(url).trim();
+  
+  // Must be HTTPS
+  if (!/^https:\/\//i.test(u)) {
+    return { valid: false, reason: 'URL must use HTTPS' };
+  }
+  
+  // Block calendar.app.google short links
+  if (/calendar\.app\.google/i.test(u)) {
+    return { valid: false, reason: 'Short link (calendar.app.google) not allowed — use full appointment schedule URL' };
+  }
+  
+  // Block owner/management URLs with /r/appointments/
+  if (/\/r\/appointments\//i.test(u)) {
+    return { valid: false, reason: 'Owner/management URL (/r/appointments/) not allowed — use booking page link' };
+  }
+  
+  // Block event confirmation links
+  if (/\/event\?|eventedit|eventdetails/i.test(u)) {
+    return { valid: false, reason: 'Event/confirmation link not allowed — use appointment schedule booking link' };
+  }
+  
+  // Must match the valid appointment schedule booking page pattern
+  // Pattern: calendar.google.com/calendar[/u/0]/appointments/schedules/{scheduleId}
+  var schedulePattern = /^https:\/\/calendar\.google\.com\/calendar(\/u\/\d+)?\/appointments\/schedules\/[A-Za-z0-9_-]+/i;
+  if (!schedulePattern.test(u)) {
+    return { valid: false, reason: 'URL is not a valid Appointment Schedule booking link (expected: calendar.google.com/calendar[/u/0]/appointments/schedules/...)' };
+  }
+  
+  return { valid: true, reason: '' };
+}
+
+/**
+ * Normalize a Google Calendar Appointment Schedule URL to the public format.
+ * Removes /u/{n}/ segment so the URL does NOT require being logged in as the calendar owner.
+ * 
+ * Input formats:
+ *   https://calendar.google.com/calendar/u/0/appointments/schedules/{id}
+ *   https://calendar.google.com/calendar/u/2/appointments/schedules/{id}
+ * 
+ * Output format:
+ *   https://calendar.google.com/calendar/appointments/schedules/{id}
+ * 
+ * @param {string} url - Raw URL (may contain /u/{n}/)
+ * @returns {string} Normalized URL (public format, no user context)
+ */
+function normalizeAppointmentScheduleUrl_(url) {
+  if (!url) return '';
+  var u = String(url).trim();
+  
+  // Replace /calendar/u/{number}/ with /calendar/
+  // This ensures the URL does not carry the owner's user context
+  var normalized = u.replace(/\/calendar\/u\/\d+\//i, '/calendar/');
+  
+  Logger.log('[URL_NORMALIZE] Input: %s', u);
+  Logger.log('[URL_NORMALIZE] Output: %s', normalized);
+  if (normalized !== u) {
+    Logger.log('[URL_NORMALIZE] Rewrote /u/{n}/ -> public format');
+  }
+  
+  return normalized;
+}

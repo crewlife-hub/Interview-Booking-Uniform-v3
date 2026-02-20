@@ -434,23 +434,97 @@ function consumeTokenForRedirect_(token, traceId) {
       return { ok: false, error: 'This link is not ready. Please verify your OTP first.', code: 'NOT_VERIFIED' };
     }
 
+    // Extract metadata for logging
+    var brand = String(row[idx['Brand']] || '');
+    var textForEmail = String(row[idx['Text For Email']] || '');
+    var clCodeMatch = textForEmail.match(/CL\d+/i);
+    var clCode = clCodeMatch ? clCodeMatch[0].toUpperCase() : 'UNKNOWN';
+
     // Get booking URL from Position Link
     var posLinkIdx = idx['Position Link'];
-    var bookingUrl = (posLinkIdx !== undefined) ? String(row[posLinkIdx] || '') : '';
+    var rawBookingUrl = (posLinkIdx !== undefined) ? String(row[posLinkIdx] || '') : '';
+    
+    // --- NORMALIZE URL: Remove /u/{n}/ to get public booking link ---
+    // This prevents "Verify it's you" when redirecting candidates
+    var bookingUrl = normalizeAppointmentScheduleUrl_(rawBookingUrl);
+
+    // --- DETAILED LOGGING ---
+    Logger.log('[REDIRECT_DEBUG] traceId=%s clCode=%s brand=%s', traceId, clCode, brand);
+    Logger.log('[REDIRECT_DEBUG] Position Link RAW: %s', rawBookingUrl || '(empty)');
+    Logger.log('[REDIRECT_DEBUG] Position Link NORMALIZED: %s', bookingUrl || '(empty)');
+    if (rawBookingUrl !== bookingUrl) {
+      Logger.log('[REDIRECT_DEBUG] URL was normalized (removed /u/{n}/ segment)');
+    }
 
     // Validate booking URL — must not be empty
     if (!bookingUrl) {
-      logEvent_(traceId, String(row[idx['Brand']] || ''), '', 'REDIRECT_BLOCKED', { reason: 'Position Link empty' });
+      logEvent_(traceId, brand, '', 'REDIRECT_BLOCKED', { reason: 'Position Link empty', clCode: clCode });
       return { ok: false, error: 'Booking link not configured. Please contact your recruiter.', code: 'NO_BOOKING_URL' };
     }
 
     // Block suspicious / misconfigured URLs
     if (bookingUrl.indexOf('script.google.com') !== -1 || bookingUrl.indexOf('docs.google.com/forms') !== -1) {
-      logEvent_(traceId, String(row[idx['Brand']] || ''), '', 'REDIRECT_BLOCKED', {
+      logEvent_(traceId, brand, '', 'REDIRECT_BLOCKED', {
         reason: 'Suspicious URL',
-        url: maskUrl_(bookingUrl)
+        url: maskUrl_(bookingUrl),
+        clCode: clCode
       });
       return { ok: false, error: 'Booking link misconfigured. Contact support.', code: 'BAD_BOOKING_URL' };
+    }
+
+    // --- VALIDATE APPOINTMENT SCHEDULE URL ---
+    var urlValidation = isValidAppointmentScheduleUrl_(bookingUrl);
+    Logger.log('[REDIRECT_DEBUG] URL validation result: valid=%s reason=%s', urlValidation.valid, urlValidation.reason || 'OK');
+    
+    if (!urlValidation.valid) {
+      // Log the failure
+      logEvent_(traceId, brand, '', 'REDIRECT_BLOCKED_INVALID_SCHEDULE_URL', {
+        clCode: clCode,
+        reason: urlValidation.reason,
+        rawUrl: rawBookingUrl,
+        normalizedUrl: bookingUrl
+      });
+      
+      // Send admin notification email
+      try {
+        var adminEmail = Session.getEffectiveUser().getEmail();
+        MailApp.sendEmail({
+          to: adminEmail,
+          subject: '[URGENT] Invalid Booking URL Detected - ' + clCode,
+          body: 'A candidate attempted to access a booking link that is NOT a valid Appointment Schedule URL.\n\n' +
+                'Details:\n' +
+                '  Trace ID: ' + traceId + '\n' +
+                '  Brand: ' + brand + '\n' +
+                '  CL Code: ' + clCode + '\n' +
+                '  Text For Email: ' + textForEmail + '\n\n' +
+                'Raw URL (from Smartsheet/Sheet):\n  ' + rawBookingUrl + '\n\n' +
+                'Normalized URL:\n  ' + bookingUrl + '\n\n' +
+                'Validation Error:\n  ' + urlValidation.reason + '\n\n' +
+                'ACTION REQUIRED:\n' +
+                'Update the Position Link / Interview Link in Smartsheet (or CL_CODES sheet) to a valid PUBLIC Appointment Schedule URL:\n' +
+                '  https://calendar.google.com/calendar/appointments/schedules/{scheduleId}\n\n' +
+                'NOTE: Do NOT use /u/0/ in the URL - use the public format above.\n\n' +
+                'How to get the correct URL:\n' +
+                '1. Open Google Calendar as the schedule owner\n' +
+                '2. Click the Appointment Schedule\n' +
+                '3. Click Share > Copy booking page link\n' +
+                '4. Ensure "Anyone with the link" is selected in schedule settings\n' +
+                '5. Update the Smartsheet/CL_CODES with this URL'
+        });
+        Logger.log('[REDIRECT_DEBUG] Admin notification email sent to %s', adminEmail);
+      } catch (mailErr) {
+        Logger.log('[REDIRECT_DEBUG] Failed to send admin email: %s', String(mailErr));
+      }
+      
+      return { ok: false, error: 'Booking link is not a valid calendar schedule. Admin has been notified.', code: 'BAD_APPOINTMENT_URL' };
+    }
+
+    // --- FINAL REDIRECT URL LOG ---
+    var isPublicFormat = /\/calendar\/appointments\/schedules\//i.test(bookingUrl) && !/\/u\/\d+\//i.test(bookingUrl);
+    Logger.log('[REDIRECT_DEBUG] Final redirect URL: %s', bookingUrl);
+    Logger.log('[REDIRECT_DEBUG] URL is public format (no /u/{n}/): %s', isPublicFormat);
+    if (!isPublicFormat) {
+      Logger.log('[REDIRECT_WARN] URL may still trigger Google login - check calendar settings');
     }
 
     // === ATOMIC: Mark USED + set Used At BEFORE returning booking URL ===
@@ -459,16 +533,17 @@ function consumeTokenForRedirect_(token, traceId) {
       sheet.getRange(sheetRow, idx['Used At'] + 1).setValue(new Date());
     }
 
-    logEvent_(traceId, String(row[idx['Brand']] || ''), '', 'TOKEN_CONSUMED', {
+    logEvent_(traceId, brand, '', 'TOKEN_CONSUMED', {
       token: token.substring(0, 8) + '...',
+      clCode: clCode,
       bookingUrl: maskUrl_(bookingUrl)
     });
 
     return {
       ok: true,
       bookingUrl: bookingUrl,
-      brand: String(row[idx['Brand']] || ''),
-      textForEmail: String(row[idx['Text For Email']] || '')
+      brand: brand,
+      textForEmail: textForEmail
     };
 
   } finally {
