@@ -199,15 +199,12 @@ function removeProcessSidewaysTrigger() {
  * MANUAL RUNNER: Process Sideways for a single brand.
  *
  * Flags:
- *   dryRun  (default true)  — true = log-only, NO emails, NO Smartsheet writes
- *                            — false = send real emails, update Smartsheet
  *   limit   (optional)      — max rows to process
  *
  * NO testEmail — emails always go to the real candidate address.
  *
  * @param {string} brand - e.g. ROYAL, COSTA, SEACHEFS
  * @param {Object=} opts
- * @param {boolean=} opts.dryRun - default true
  * @param {number=} opts.limit - default 200
  * @returns {Object} worker result
  */
@@ -220,27 +217,24 @@ function runSidewaysForBrand(brand, opts) {
     return { ok: false, error: 'brand is required (e.g. ROYAL)' };
   }
 
-  var dryRun = (opts.dryRun === undefined) ? true : !!opts.dryRun;
-
-  var workerOpts = { brand: b, dryRun: dryRun };
+  var workerOpts = { brand: b };
   if (opts.limit !== undefined && opts.limit !== null && opts.limit !== '') {
     workerOpts.limit = Number(opts.limit);
   }
 
-  Logger.log('runSidewaysForBrand: brand=%s dryRun=%s limit=%s', b, dryRun, workerOpts.limit === undefined ? '(none)' : workerOpts.limit);
+  Logger.log('runSidewaysForBrand: brand=%s limit=%s', b, workerOpts.limit === undefined ? '(none)' : workerOpts.limit);
   var res = processSidewaysInvites_(workerOpts);
   Logger.log('runSidewaysForBrand: result=%s', JSON.stringify(res));
   return res;
 }
 
-// Convenience helpers: DRY-RUN (log-only, no emails, no updates)
+// Convenience helpers (always LIVE)
 function runSideways_ROYAL() {
-  return runSidewaysForBrand('ROYAL', { dryRun: true });
+  return runSidewaysForBrand('ROYAL');
 }
 
-// Convenience helpers: LIVE (real emails, real Smartsheet updates)
 function runSidewaysLive_ROYAL() {
-  return runSidewaysForBrand('ROYAL', { dryRun: false });
+  return runSidewaysForBrand('ROYAL');
 }
 
 /**
@@ -275,15 +269,15 @@ function dumpSheetColumns_COSTA() { return dumpSheetColumns('COSTA'); }
 function dumpSheetColumns_SEACHEFS() { return dumpSheetColumns('SEACHEFS'); }
 
 function runSideways_COSTA() {
-  return runSidewaysForBrand('COSTA', { dryRun: true });
+  return runSidewaysForBrand('COSTA');
 }
 function runSidewaysLive_COSTA() {
-  return runSidewaysForBrand('COSTA', { dryRun: false });
+  return runSidewaysForBrand('COSTA');
 }
 
 function runSideways_SEACHEFS() {
-  return runSidewaysForBrand('SEACHEFS', { dryRun: true });
+  return runSidewaysForBrand('SEACHEFS');
 }
 function runSidewaysLive_SEACHEFS() {
-  return runSidewaysForBrand('SEACHEFS', { dryRun: false });
+  return runSidewaysForBrand('SEACHEFS');
 }

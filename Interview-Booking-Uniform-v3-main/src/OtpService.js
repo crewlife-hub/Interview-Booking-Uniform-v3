@@ -490,24 +490,48 @@ function sendBookingConfirmEmail_(params) {
   var position = String(params.position || params.textForEmail || '').trim();
   var traceId = params.traceId || generateTraceId_();
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  // HARDCODED CTA BASE - DO NOT CHANGE - THIS IS THE ONLY URL ALLOWED IN EMAILS
-  // ═══════════════════════════════════════════════════════════════════════════
-  var HARDCODED_CTA_BASE = 'https://script.google.com/macros/s/AKfycbx-IEEieMEvXPf0cXC_R_y6KKtWOMkA2nXJkU1mu8XlIMY7MnCn5eamrzjzvre0frZm0Q/exec';
-  
   Logger.log('███ sendBookingConfirmEmail_ CALLED ███');
-  Logger.log('███ HARDCODED_CTA_BASE: ' + HARDCODED_CTA_BASE);
   Logger.log('███ Input bookingUrl: ' + (bookingUrl ? bookingUrl.substring(0, 80) : 'NONE'));
   Logger.log('███ Input accessUrl: ' + (accessUrl ? accessUrl.substring(0, 80) : 'NONE'));
   Logger.log('███ Input token: ' + (token ? token.substring(0, 20) + '...' : 'NONE'));
 
-  // If caller passes accessUrl only, extract token so we can rebuild canonical gate URL.
+  // Input validation FIRST (do not create OTP/token or send if invalid email)
+  if (!isValidEmail_(email)) {
+    Logger.log('[sendBookingConfirmEmail_] Invalid email');
+    return { ok: false, error: 'Invalid email address' };
+  }
+
+  // Hard safety-rails: never send to forbidden or placeholder addresses
+  if (isForbiddenRecipientEmail_(email)) {
+    Logger.log('[sendBookingConfirmEmail_] Forbidden recipient blocked: %s', email);
+    return { ok: false, error: 'Forbidden recipient email address' };
+  }
+  if (isPlaceholderEmail_(email)) {
+    Logger.log('[sendBookingConfirmEmail_] Placeholder recipient blocked: %s', email);
+    return { ok: false, error: 'Placeholder recipient email address' };
+  }
+
+  // Resolve dynamic CTA base from Script Properties
+  var ctaBase = getEmailCtaBaseUrl_();
+  Logger.log('[sendBookingConfirmEmail_] resolved ctaBase=%s', ctaBase);
+
+  // If caller passes accessUrl/ctaUrl only, extract token so we can rebuild canonical CTA URL.
   if (!token && accessUrl) {
     try {
       var tokenMatch = accessUrl.match(/[?&]token=([^&]+)/i);
       if (tokenMatch && tokenMatch[1]) {
         token = decodeURIComponent(tokenMatch[1]);
         Logger.log('███ Extracted token from accessUrl: ' + token.substring(0, 20) + '...');
+      }
+    } catch (e) {}
+  }
+
+  if (!token && ctaUrl) {
+    try {
+      var tokenMatch2 = ctaUrl.match(/[?&]token=([^&]+)/i);
+      if (tokenMatch2 && tokenMatch2[1]) {
+        token = decodeURIComponent(tokenMatch2[1]);
+        Logger.log('███ Extracted token from ctaUrl: ' + token.substring(0, 20) + '...');
       }
     } catch (e) {}
   }
@@ -530,15 +554,16 @@ function sendBookingConfirmEmail_(params) {
     Logger.log('███ Issued new token: ' + token.substring(0, 20) + '...');
   }
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  // BUILD THE CTA URL
-  // Sideways flow can pass ctaUrl directly as HARDCODED_CTA_BASE + '?token=' + token
-  // ═══════════════════════════════════════════════════════════════════════════
-  if (!ctaUrl && token) {
-    accessUrl = HARDCODED_CTA_BASE + '?page=access&token=' + encodeURIComponent(token);
-    Logger.log('███ Built accessUrl from HARDCODED base: ' + accessUrl.substring(0, 100));
+  // BUILD CTA URL from dynamic base + token (required)
+  var finalCtaUrl = '';
+  if (token) {
+    finalCtaUrl = ctaBase + '?token=' + encodeURIComponent(token);
+  } else {
+    // Last-resort fallback for legacy callers that pass accessUrl without token
+    finalCtaUrl = ctaUrl || accessUrl;
   }
-  var finalCtaUrl = ctaUrl || accessUrl;
+
+  Logger.log('[sendBookingConfirmEmail_] built accessUrl=%s', finalCtaUrl);
 
   // ═══════════════════════════════════════════════════════════════════════════
   // VALIDATION - BLOCK ANY EMAIL WITH CALENDAR URL - THIS MUST NEVER PASS
@@ -551,23 +576,19 @@ function sendBookingConfirmEmail_(params) {
     Logger.log('███ BLOCKED - Calendar URL detected in CTA! Email NOT sent.');
     return { ok: false, error: 'BLOCKED: Calendar URL in CTA - contact admin' };
   }
-  
-  if (finalCtaUrl.indexOf(HARDCODED_CTA_BASE) !== 0) {
-    Logger.log('███ BLOCKED - CTA does not start with hardcoded base! Email NOT sent.');
-    return { ok: false, error: 'BLOCKED: CTA must use hardcoded web app URL' };
+
+  // Validate CTA base against resolved dynamic base
+  if (ctaBase && finalCtaUrl && finalCtaUrl.indexOf(ctaBase) !== 0) {
+    Logger.log('███ BLOCKED - CTA does not start with dynamic ctaBase! Email NOT sent.');
+    return { ok: false, error: 'BLOCKED: CTA must use WEB_APP_EXEC_URL base' };
   }
-  
+
   logEvent_(traceId, brand, email, 'BOOKING_EMAIL_CTA_BUILT', {
-    ctaBase: HARDCODED_CTA_BASE,
+    ctaBase: ctaBase,
     isCalendar: isCalendar,
     hasToken: !!token
   });
 
-  // Input validation
-  if (!email || email.indexOf('@') === -1) {
-    Logger.log('[sendBookingConfirmEmail_] Invalid email');
-    return { ok: false, error: 'Invalid email address' };
-  }
   if (!finalCtaUrl) {
     Logger.log('[sendBookingConfirmEmail_] Missing access URL');
     return { ok: false, error: 'Missing access URL - cannot send email without link' };
@@ -608,10 +629,12 @@ function sendBookingConfirmEmail_(params) {
     
     logEvent_(traceId, brand, maskedEmail, 'BOOKING_EMAIL_SENT', { accessUrl: maskUrl_(finalCtaUrl) });
     Logger.log('[sendBookingConfirmEmail_] SUCCESS - email sent to %s', maskedEmail);
+    Logger.log('[sendBookingConfirmEmail_] OUTCOME ok=true error=null');
     return { ok: true };
   } catch (e) {
     logEvent_(traceId, brand, maskedEmail, 'BOOKING_EMAIL_FAILED', { error: String(e) });
     Logger.log('[sendBookingConfirmEmail_] FAILED: %s', e);
+    Logger.log('[sendBookingConfirmEmail_] OUTCOME ok=false error=%s', String(e));
     return { ok: false, error: 'Failed to send booking email: ' + String(e) };
   }
 }

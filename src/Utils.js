@@ -86,6 +86,34 @@ function isValidEmail_(email) {
 }
 
 /**
+ * True if the recipient email is explicitly forbidden.
+ * Used as a hard safety-rail: never send to these addresses.
+ * @param {string} email
+ * @returns {boolean}
+ */
+function isForbiddenRecipientEmail_(email) {
+  var e = String(email || '').trim().toLowerCase();
+  return e === 'info@crewlifeatsea.com' || e === 'infop@crewlifeatsea.com';
+}
+
+/**
+ * Heuristic placeholder detection.
+ * @param {string} email
+ * @returns {boolean}
+ */
+function isPlaceholderEmail_(email) {
+  var e = String(email || '').trim().toLowerCase();
+  if (!e) return true;
+  var at = e.indexOf('@');
+  if (at === -1) return false;
+  var local = e.substring(0, at);
+  var domain = e.substring(at + 1);
+  if (domain === 'example.com' || domain === 'example.org' || domain === 'example.net') return true;
+  if (local === 'noreply' || local === 'no-reply') return true;
+  return false;
+}
+
+/**
  * Debug dump for diagnostics endpoint
  * @param {string} brand - Brand code
  * @returns {Object} Diagnostic info

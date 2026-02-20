@@ -20,26 +20,20 @@ var WEB_APP_EXEC_URL_TARGET = 'https://script.google.com/macros/s/AKfycbx-IEEieM
 var CANONICAL_WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbx-IEEieMEvXPf0cXC_R_y6KKtWOMkA2nXJkU1mu8XlIMY7MnCn5eamrzjzvre0frZm0Q/exec';
 
 /**
- * Return the canonical web app base URL for email CTAs.
- * Uses ScriptApp.getService().getUrl() to always return the URL of 
- * the CURRENTLY EXECUTING deployment - no hardcoding needed.
- * Falls back to WEB_APP_EXEC_URL script property or CANONICAL_WEB_APP_URL constant.
+ * Return the web app base URL for email CTAs.
+ * REQUIRED: must be configured via Script Properties `WEB_APP_EXEC_URL`.
  * @returns {string}
  */
 function getEmailCtaBaseUrl_() {
-  // Prefer explicit configured URL so email CTA is EXACTLY the expected /exec URL.
-  try {
-    var props = PropertiesService.getScriptProperties();
-    var propUrl = props.getProperty('WEB_APP_EXEC_URL');
-    if (propUrl) {
-      Logger.log('[getEmailCtaBaseUrl_] Using WEB_APP_EXEC_URL property: ' + propUrl);
-      return propUrl;
-    }
-  } catch (e) {}
-  
-  // Last resort: hardcoded constant
-  Logger.log('[getEmailCtaBaseUrl_] Using CANONICAL_WEB_APP_URL constant');
-  return CANONICAL_WEB_APP_URL;
+  var props = PropertiesService.getScriptProperties();
+  var propUrl = String(props.getProperty('WEB_APP_EXEC_URL') || '').trim();
+  if (!propUrl) {
+    throw new Error('Missing Script Property WEB_APP_EXEC_URL. Set it to the deployed web app /exec URL.');
+  }
+  // Normalize trailing slash only (do not invent/replace URLs)
+  if (propUrl.slice(-1) === '/') propUrl = propUrl.slice(0, -1);
+  Logger.log('[getEmailCtaBaseUrl_] WEB_APP_EXEC_URL=%s', propUrl);
+  return propUrl;
 }
 
 /**

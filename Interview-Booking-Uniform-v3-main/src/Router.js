@@ -57,6 +57,14 @@ function doGet(e) {
       return serveSecureAccess_(params, traceId);
     }
 
+    // Route: Token-only CTA (no page param) — treat as secure access
+    if (token && !page) {
+      if (String(params.confirm || '') === '1') {
+        return handleSecureAccessConfirm_(params, traceId);
+      }
+      return serveSecureAccess_(params, traceId);
+    }
+
     // Route: Booking confirmation page (legacy — neutered, use secure access flow)
     if (page === 'booking') {
       return serveErrorPage_('Deprecated', 'This page is no longer available. Please use the secure access link from your email.', traceId);
@@ -116,10 +124,9 @@ function doPost(e) {
     // Route: Run Sideways invites worker (POST)
     // This processes Smartsheet rows with SEND Interview Invite = "Sideways"
     if (action === 'processsideways') {
-      var dry = params.dryRun === 'true' || params.dryRun === true;
       var brand = params.brand || null;
       var limit = params.limit ? Number(params.limit) : undefined;
-      var res = processSidewaysInvites_({ dryRun: dry, brand: brand, limit: limit });
+      var res = processSidewaysInvites_({ brand: brand, limit: limit });
       return jsonResponse_(res);
     }
 

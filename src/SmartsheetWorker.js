@@ -5,8 +5,6 @@
  * send token-gated booking invite emails, and batch-update rows.
  *
  * FLAGS (via opts):
- *   dryRun  (default true)  - true  = log-only, NO emails, NO updates
- *                            - false = send real emails, update Smartsheet
  *   brand   (optional)      - restrict to one brand (e.g. 'ROYAL')
  *   limit   (optional)      - max rows to process
  *
@@ -16,12 +14,11 @@
 
 /**
  * Process rows across all brands (or single brand) where SEND == "Sideways".
- * @param {Object} opts - { dryRun: boolean, brand: string|null, limit: number }
+ * @param {Object} opts - { brand: string|null, limit: number }
  * @returns {Object} summary
  */
 function processSidewaysInvites_(opts) {
   opts = opts || {};
-  var dryRun = (opts.dryRun === undefined) ? true : !!opts.dryRun;
 
   var limit = (opts.limit === undefined || opts.limit === null || opts.limit === '')
     ? Number.MAX_SAFE_INTEGER
@@ -29,10 +26,9 @@ function processSidewaysInvites_(opts) {
   if (!isFinite(limit) || limit <= 0) limit = Number.MAX_SAFE_INTEGER;
 
   var brands = opts.brand ? [String(opts.brand).toUpperCase()] : getAllBrandCodes_();
-  var SIDEWAYS_CTA_BASE = getEmailCtaBaseUrl_();
 
   var traceId = generateTraceId_();
-  logEvent_(traceId, '', '', 'SIDEWAYS_RUN_START', { dryRun: dryRun, brands: brands, limit: limit });
+  logEvent_(traceId, '', '', 'SIDEWAYS_RUN_START', { mode: 'LIVE', brands: brands, limit: limit });
 
   var results = { traceId: traceId, processed: 0, sent: 0, updated: 0, skipped: 0, errors: [] };
 
@@ -179,6 +175,9 @@ function processSidewaysInvites_(opts) {
           // -- IDEMPOTENCY: skip rows already sent ----------------------
           var sendLower = sendVal.toLowerCase();
           if (sendLower.indexOf('sent') !== -1 && sendLower !== 'sideways') {
+            Logger.log('[SIDEWAYS_SKIP_ALREADY_SENT] rowId=%s brand=%s sendVal=%s', row.id, brand, sendVal);
+            logEvent_(traceId, brand, '', 'SIDEWAYS_SKIP_ALREADY_SENT', { rowId: row.id, sendVal: sendVal });
+            results.skipped++;
             continue; // already processed (e.g. "🔔 Sent")
           }
           if (sendLower !== 'sideways') continue;
@@ -192,15 +191,24 @@ function processSidewaysInvites_(opts) {
           var candidateName = rowMap['Full Name'] || rowMap['Name'] || rowMap['First Name'] || '';
           var position = rowMap['Position Applied'] || rowMap['Position'] || rowMap['Job Title'] || textForEmail;
 
+          Logger.log('[SIDEWAYS_ROW_FOUND] rowId=%s brand=%s email=%s', row.id, brand, String(candidateEmail || ''));
+
           var stepDetails = {
             sheetId: sheetId, sheetName: sheetName, rowId: row.id,
-            email: candidateEmail, brand: brand, textForEmail: textForEmail, dryRun: dryRun
+            email: candidateEmail, brand: brand, textForEmail: textForEmail
           };
           logEvent_(traceId, brand, candidateEmail, 'SIDEWAYS_ROW_FOUND', stepDetails);
 
           // -- FIELD VALIDATION -----------------------------------------
-          if (!candidateEmail) {
-            logEvent_(traceId, brand, '', 'SIDEWAYS_ROW_SKIPPED_NO_EMAIL', { rowId: row.id });
+          var candidateEmailNorm = String(candidateEmail || '').trim().toLowerCase();
+          if (!candidateEmailNorm || !isValidEmail_(candidateEmailNorm) || isPlaceholderEmail_(candidateEmailNorm) || isForbiddenRecipientEmail_(candidateEmailNorm)) {
+            Logger.log('[SIDEWAYS_SKIP_INVALID_EMAIL] rowId=%s brand=%s email=%s', row.id, brand, String(candidateEmail || ''));
+            logEvent_(traceId, brand, String(candidateEmail || ''), 'SIDEWAYS_ROW_SKIPPED_INVALID_EMAIL', {
+              rowId: row.id,
+              email: String(candidateEmail || ''),
+              forbidden: isForbiddenRecipientEmail_(candidateEmailNorm),
+              placeholder: isPlaceholderEmail_(candidateEmailNorm)
+            });
             results.skipped++;
             continue;
           }
@@ -210,45 +218,36 @@ function processSidewaysInvites_(opts) {
             continue;
           }
 
-          // -- DRY-RUN: log only, no sends, no updates ------------------
-          if (dryRun) {
-            Logger.log('[SIDEWAYS_ACTION] DRY_RUN rowId=%s email=%s brand=%s textForEmail=%s — would send email and update to 🔔 Sent', row.id, candidateEmail, brand, textForEmail);
-            logEvent_(traceId, brand, candidateEmail, 'SIDEWAYS_DRYRUN_SKIP', { rowId: row.id, email: candidateEmail });
-            results.skipped++;
-            continue;
-          }
-
           // -- LIVE: create OTP + send email ----------------------------
           var otpCreated = createOtp_({
-            email: candidateEmail,
+            email: candidateEmailNorm,
             brand: brand,
             textForEmail: textForEmail,
             traceId: traceId
           });
           if (!otpCreated.ok || !otpCreated.token) {
-            logEvent_(traceId, brand, candidateEmail, 'SIDEWAYS_TOKEN_CREATE_FAILED', { rowId: row.id, error: otpCreated.error || 'unknown' });
+            logEvent_(traceId, brand, candidateEmailNorm, 'SIDEWAYS_TOKEN_CREATE_FAILED', { rowId: row.id, error: otpCreated.error || 'unknown' });
             results.errors.push({ rowId: row.id, error: 'Token creation failed: ' + (otpCreated.error || 'unknown') });
             results.skipped++;
             continue;
           }
 
-          var ctaUrl = SIDEWAYS_CTA_BASE + '?token=' + encodeURIComponent(otpCreated.token);
-          Logger.log('[SIDEWAYS_CTA_URL] base=%s hasToken=%s', SIDEWAYS_CTA_BASE, !!otpCreated.token);
+          Logger.log('[OTP_CREATED] rowId=%s brand=%s email=%s', row.id, brand, candidateEmailNorm);
+          logEvent_(traceId, brand, candidateEmailNorm, 'OTP_CREATED', { rowId: row.id });
 
           var emailResult = sendBookingConfirmEmail_({
-            email: candidateEmail,
+            email: candidateEmailNorm,
             brand: brand,
             textForEmail: textForEmail,
             position: position,
             token: otpCreated.token,
-            ctaUrl: ctaUrl,
             candidateName: candidateName,
             traceId: traceId
           });
 
-          Logger.log('[SIDEWAYS_ACTION] SEND rowId=%s email=%s brand=%s ok=%s', row.id, candidateEmail, brand, emailResult.ok);
-          logEvent_(traceId, brand, candidateEmail, 'SIDEWAYS_EMAIL_SENT', {
-            rowId: row.id, to: candidateEmail, ok: emailResult.ok, error: emailResult.error || null
+          Logger.log('[SIDEWAYS_EMAIL_SENT] rowId=%s email=%s brand=%s ok=%s error=%s', row.id, candidateEmailNorm, brand, emailResult.ok, emailResult.error || '');
+          logEvent_(traceId, brand, candidateEmailNorm, 'SIDEWAYS_EMAIL_SENT', {
+            rowId: row.id, to: candidateEmailNorm, ok: emailResult.ok, error: emailResult.error || null
           });
 
           if (!emailResult.ok) {
@@ -271,6 +270,7 @@ function processSidewaysInvites_(opts) {
         if (pendingUpdates.length > 0) {
           Logger.log('[SIDEWAYS_BATCH] Updating %s rows in sheet %s', pendingUpdates.length, sheetId);
           var batchResult = batchUpdateSmartsheetRows_(sheetId, pendingUpdates, apiToken, colMetaById);
+          Logger.log('[SIDEWAYS_SMARTSHEET_UPDATE_OCCURRED] sheetId=%s ok=%s updated=%s', sheetId, batchResult.ok, batchResult.updated || 0);
           logEvent_(traceId, brand, '', 'SIDEWAYS_BATCH_UPDATE', {
             sheetId: sheetId, requested: pendingUpdates.length,
             ok: batchResult.ok, updated: batchResult.updated || 0,
@@ -279,6 +279,15 @@ function processSidewaysInvites_(opts) {
           if (batchResult.ok) {
             results.updated += (batchResult.updated || pendingUpdates.length);
             Logger.log('[SIDEWAYS_BATCH] %s rows updated successfully', batchResult.updated || pendingUpdates.length);
+            var expectedUpdated = pendingUpdates.length;
+            var actualUpdated = batchResult.updated || expectedUpdated;
+            if (actualUpdated === expectedUpdated) {
+              for (var u = 0; u < pendingUpdates.length; u++) {
+                Logger.log('[SIDEWAYS_UPDATE_OK] sheetId=%s rowId=%s', sheetId, pendingUpdates[u].id);
+              }
+            } else {
+              Logger.log('[SIDEWAYS_UPDATE_OK] sheetId=%s updated=%s', sheetId, actualUpdated);
+            }
           } else {
             // Batch failed — fall back to per-row updates
             Logger.log('[SIDEWAYS_BATCH] Batch failed: %s — falling back to per-row', batchResult.error);
@@ -287,6 +296,7 @@ function processSidewaysInvites_(opts) {
               var perRowResult = patchRowCellsByColumnId_(sheetId, rowUpdate.id, rowUpdate.cells, apiToken, colMetaById);
               if (perRowResult.ok) {
                 results.updated++;
+                Logger.log('[SIDEWAYS_UPDATE_OK] sheetId=%s rowId=%s', sheetId, rowUpdate.id);
               } else {
                 results.errors.push({ rowId: rowUpdate.id, error: 'Row update failed: ' + perRowResult.error });
               }
@@ -304,6 +314,7 @@ function processSidewaysInvites_(opts) {
     return { ok: false, error: String(e) };
   }
 
+  Logger.log('[SIDEWAYS_SUMMARY] processed=%s sent=%s updated=%s skipped=%s errors=%s', results.processed, results.sent, results.updated, results.skipped, (results.errors || []).length);
   logEvent_(traceId, '', '', 'SIDEWAYS_RUN_COMPLETE', results);
   return { ok: true, summary: results };
 }
@@ -335,11 +346,11 @@ function getSmartsheetCellString_(cell) {
 
 /**
  * Scheduled runner (time-based trigger target).
- * Runs with dryRun=false — real emails, real Smartsheet updates.
+ * Runs LIVE — real emails, real Smartsheet updates.
  * Conservative limit to avoid timeouts/quota spikes.
  */
 function processSidewaysInvitesScheduled_() {
-  return processSidewaysInvites_({ dryRun: false, limit: 200 });
+  return processSidewaysInvites_({ limit: 200 });
 }
 
 
