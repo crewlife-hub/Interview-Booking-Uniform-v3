@@ -12,6 +12,25 @@
  * ===========================================================================
  */
 
+// ── Sideways performance constants ──────────────────────────────────────
+var SIDEWAYS_MAX_MS_PER_RUN    = 330000;   // 5 min 30 sec hard ceiling
+var SIDEWAYS_MAX_ROWS_TO_SCAN  = 10000;    // max rows to examine per sheet per run
+var SIDEWAYS_MAX_MATCHES       = 50;       // stop collecting after this many Sideways hits
+var SIDEWAYS_PROGRESS_INTERVAL = 200;      // log progress every N rows scanned
+
+/** Read the cursor index from ScriptProperties for a brand+sheet combo. */
+function getSidewaysCursor_(brand, sheetId) {
+  var key = 'SIDEWAYS_CURSOR_' + brand + '_' + sheetId;
+  var val = PropertiesService.getScriptProperties().getProperty(key);
+  return val ? Number(val) : 0;
+}
+
+/** Write the cursor index to ScriptProperties for a brand+sheet combo. */
+function setSidewaysCursor_(brand, sheetId, index) {
+  var key = 'SIDEWAYS_CURSOR_' + brand + '_' + sheetId;
+  PropertiesService.getScriptProperties().setProperty(key, String(index));
+}
+
 /**
  * Process rows across all brands (or single brand) where SEND == "Sideways".
  * @param {Object} opts - { brand: string|null, limit: number }
@@ -19,11 +38,12 @@
  */
 function processSidewaysInvites_(opts) {
   opts = opts || {};
+  var runStart = Date.now();
 
   var limit = (opts.limit === undefined || opts.limit === null || opts.limit === '')
-    ? Number.MAX_SAFE_INTEGER
+    ? SIDEWAYS_MAX_MATCHES
     : Number(opts.limit);
-  if (!isFinite(limit) || limit <= 0) limit = Number.MAX_SAFE_INTEGER;
+  if (!isFinite(limit) || limit <= 0) limit = SIDEWAYS_MAX_MATCHES;
 
   var brands = opts.brand ? [String(opts.brand).toUpperCase()] : getAllBrandCodes_();
 
@@ -63,12 +83,14 @@ function processSidewaysInvites_(opts) {
 
       for (var s = 0; s < sheetIds.length; s++) {
         if (results.processed >= limit) break;
+        if (Date.now() - runStart > SIDEWAYS_MAX_MS_PER_RUN) break;
         var sheetId = sheetIds[s];
         var remaining = limit - results.processed;
         var sheetResult = processSidewaysForSheet_(sheetId, brand, {
           apiToken: apiToken,
           traceId: traceId,
-          limit: remaining
+          limit: remaining,
+          runStart: runStart
         });
 
         if (!sheetResult.ok) {
@@ -371,7 +393,7 @@ function getSmartsheetCellString_(cell) {
  * Conservative limit to avoid timeouts/quota spikes.
  */
 function processSidewaysInvitesScheduled_() {
-  return processSidewaysInvites_({ limit: 200 });
+  return processSidewaysInvites_({ limit: SIDEWAYS_MAX_MATCHES });
 }
 
 

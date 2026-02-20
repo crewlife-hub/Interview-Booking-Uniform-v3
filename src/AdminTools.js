@@ -217,10 +217,11 @@ function runSidewaysForBrand(brand, opts) {
     return { ok: false, error: 'brand is required (e.g. ROYAL)' };
   }
 
+  var runStart = Date.now();
   var limit = (opts.limit === undefined || opts.limit === null || opts.limit === '')
-    ? Number.MAX_SAFE_INTEGER
+    ? SIDEWAYS_MAX_MATCHES
     : Number(opts.limit);
-  if (!isFinite(limit) || limit <= 0) limit = Number.MAX_SAFE_INTEGER;
+  if (!isFinite(limit) || limit <= 0) limit = SIDEWAYS_MAX_MATCHES;
 
   var cfg = getConfig_();
   var apiToken = cfg.SMARTSHEET_API_TOKEN;
@@ -248,15 +249,17 @@ function runSidewaysForBrand(brand, opts) {
     errors: []
   };
 
-  Logger.log('runSidewaysForBrand: brand=%s sheets=%s limit=%s', b, sheetIds.length, limit === Number.MAX_SAFE_INTEGER ? '(none)' : limit);
+  Logger.log('runSidewaysForBrand: brand=%s sheets=%s limit=%s', b, sheetIds.length, limit === SIDEWAYS_MAX_MATCHES ? '(default)' : limit);
 
   for (var i = 0; i < sheetIds.length; i++) {
     if (summary.processed >= limit) break;
+    if (Date.now() - runStart > SIDEWAYS_MAX_MS_PER_RUN) break;
     var remaining = limit - summary.processed;
     var res = processSidewaysForSheet_(sheetIds[i], b, {
       apiToken: apiToken,
       traceId: traceId,
-      limit: remaining
+      limit: remaining,
+      runStart: runStart
     });
 
     if (!res.ok) {
