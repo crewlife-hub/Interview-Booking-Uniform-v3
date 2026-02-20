@@ -14,6 +14,32 @@ var TOKEN_STATUS = {
 };
 
 /**
+ * Atomically mark a TOKENS row as USED + set Used At + set Locked=LOCKED.
+ * Implementation is a single row-level setValues() call.
+ * @param {GoogleAppsScript.Spreadsheet.Sheet} sheet
+ * @param {number} rowIndex 1-based
+ */
+function markTokensRowUsedAndLocked_(sheet, rowIndex) {
+  if (!sheet || !rowIndex || rowIndex < 2) throw new Error('Invalid sheet/row for markTokensRowUsedAndLocked_');
+
+  var lastCol = Math.max(sheet.getLastColumn(), 28); // ensure AB exists
+  var headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(function(h) { return String(h || '').trim(); });
+  var statusIdx = headers.indexOf('Status');
+  var usedAtIdx = headers.indexOf('Used At');
+  var lockedIdx = headers.indexOf('Locked');
+  if (lockedIdx === -1) lockedIdx = 27; // AB fallback
+
+  if (statusIdx === -1) throw new Error('TOKENS.Status header missing');
+
+  var row = sheet.getRange(rowIndex, 1, 1, lastCol).getValues()[0];
+  row[statusIdx] = 'USED';
+  if (usedAtIdx !== -1) row[usedAtIdx] = new Date();
+  row[lockedIdx] = 'LOCKED';
+
+  sheet.getRange(rowIndex, 1, 1, lastCol).setValues([row]);
+}
+
+/**
  * Generate a secure random token
  * @returns {string} Token string
  */
@@ -47,11 +73,37 @@ function hashEmail_(email) {
  * @returns {Object} Result with token
  */
 function issueToken_(params) {
+  var email = String(params.email || '').toLowerCase().trim();
+  var brand = String(params.brand || '').toUpperCase().trim();
+  var textForEmail = String(params.textForEmail || '').trim();
+
   var ss = getConfigSheet_();
   var sheet = ss.getSheetByName('TOKENS');
   if (!sheet) {
     ensureConfigSheetTabs_();
     sheet = ss.getSheetByName('TOKENS');
+  }
+
+  // BLOCK: Do not issue a new token if an existing USED or LOCKED invite exists
+  // for the same Brand + Email + Text For Email.
+  try {
+    var block = findBlockingInviteInTokens_({
+      sheet: sheet,
+      brand: brand,
+      email: email,
+      textForEmail: textForEmail
+    });
+    if (block && block.blocked) {
+      Logger.log('[INVITE_BLOCK] brand=%s email=%s textForEmail=%s matchedRow=%s status=%s locked=%s',
+        brand, email, textForEmail, block.rowIndex, block.status || '', block.locked || '');
+      return {
+        ok: false,
+        code: 'INVITE_BLOCKED',
+        error: 'This invite has already been used. Please request a new OTP or contact support.'
+      };
+    }
+  } catch (e) {
+    Logger.log('[INVITE_BLOCK_GUARD_ERROR] %s', String(e));
   }
   
   var cfg = getConfig_();
@@ -64,10 +116,10 @@ function issueToken_(params) {
   
   var row = [
     token,                              // Token
-    maskEmail_(params.email),           // Email (masked)
-    hashEmail_(params.email),           // Email Hash
-    params.textForEmail || '',          // Text For Email
-    params.brand || '',                 // Brand
+    maskEmail_(email),                  // Email (masked)
+    hashEmail_(email),                  // Email Hash
+    textForEmail || '',                 // Text For Email
+    brand || '',                        // Brand
     params.clCode || '',                // CL Code
     TOKEN_STATUS.ISSUED,                // Status
     expiry,                             // Expiry
@@ -78,6 +130,10 @@ function issueToken_(params) {
   ];
   
   sheet.appendRow(row);
+
+  try {
+    Logger.log('[INVITE_CREATE] brand=%s email=%s textForEmail=%s row=%s', brand, email, textForEmail, sheet.getLastRow());
+  } catch (e) {}
   
   logEvent_(params.traceId, params.brand, params.email, 'TOKEN_ISSUED', {
     token: token.substring(0, 8) + '...',
@@ -200,22 +256,11 @@ function confirmTokenAndMarkUsed_(token, traceId) {
   
   var ss = getConfigSheet_();
   var sheet = ss.getSheetByName('TOKENS');
-  var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
-  var statusIdx = headers.indexOf('Status');
-  var usedAtIdx = headers.indexOf('Used At');
-  
-  // Mark as USED
-  sheet.getRange(validation.rowIndex, statusIdx + 1).setValue(TOKEN_STATUS.USED);
-  sheet.getRange(validation.rowIndex, usedAtIdx + 1).setValue(new Date());
-  // Mark as LOCKED via HeaderFixer lockRow_ (finds Locked column dynamically)
-  try {
-    lockRow_(sheet, validation.rowIndex);
-  } catch (lockErr) {
-    Logger.log('[INVITE_LOCK_ERROR] lockRow_ failed, falling back to col 28: %s', lockErr);
-    sheet.getRange(validation.rowIndex, 28).setValue('LOCKED');
-  }
+
+  // ATOMIC: Mark USED + set Used At + set Locked=LOCKED (single row setValues)
+  markTokensRowUsedAndLocked_(sheet, validation.rowIndex);
   SpreadsheetApp.flush();
-  Logger.log('[INVITE_LOCK] row=%s LOCKED — flushed', validation.rowIndex);
+  Logger.log('[INVITE_LOCK] row=%s USED+LOCKED — flushed', validation.rowIndex);
   
   logEvent_(traceId, validation.brand, '', 'TOKEN_USED', {
     token: token.substring(0, 8) + '...',
@@ -422,11 +467,12 @@ function consumeTokenForRedirect_(token, traceId) {
 
     var row = data[targetRow];
     var status = String(row[idx['Status']] || '');
+    var lockedVal = (idx['Locked'] !== undefined) ? String(row[idx['Locked']] || '') : '';
     var expiry = new Date(row[idx['Expiry']]);
     var sheetRow = targetRow + 1;
 
     // Already used — hard block
-    if (status === 'USED') {
+    if (String(status).toUpperCase() === 'USED' || String(lockedVal).toUpperCase().trim() === 'LOCKED') {
       return { ok: false, error: 'This link has already been used. Please request a new OTP.', code: 'ALREADY_USED' };
     }
 
@@ -553,19 +599,9 @@ function consumeTokenForRedirect_(token, traceId) {
     }
 
     // === ATOMIC: Mark USED + set Used At + LOCKED BEFORE returning booking URL ===
-    sheet.getRange(sheetRow, idx['Status'] + 1).setValue('USED');
-    if (idx['Used At'] !== undefined) {
-      sheet.getRange(sheetRow, idx['Used At'] + 1).setValue(new Date());
-    }
-    // Mark as LOCKED via HeaderFixer lockRow_ (finds Locked column dynamically)
-    try {
-      lockRow_(sheet, sheetRow);
-    } catch (lockErr) {
-      Logger.log('[INVITE_LOCK_ERROR] lockRow_ failed, falling back to col 28: %s', lockErr);
-      sheet.getRange(sheetRow, 28).setValue('LOCKED');
-    }
+    markTokensRowUsedAndLocked_(sheet, sheetRow);
     SpreadsheetApp.flush();   // force all writes to commit before lock releases
-    Logger.log('[INVITE_LOCK] row=%s LOCKED — flushed', sheetRow);
+    Logger.log('[INVITE_LOCK] row=%s USED+LOCKED — flushed', sheetRow);
 
     logEvent_(traceId, brand, '', 'TOKEN_CONSUMED', {
       token: token.substring(0, 8) + '...',

@@ -264,6 +264,85 @@ function startOtpByTextForEmail(params, traceId) {
     return { ok: false, error: 'Unknown brand: ' + brand };
   }
 
+  // ── EARLY INVITE GUARD ────────────────────────────────────────────────────
+  // Before ANYTHING else: scan TOKENS sheet in memory for a blocking row.
+  // Blocking = Status=='USED' OR Locked=='LOCKED' for same brand+email+textForEmail.
+  // SUPERSEDED rows are NOT blocking (user may re-request after expiry/supersede).
+  // This runs before Smartsheet lookup and before any row is written.
+  try {
+    var ss = getConfigSheet_();
+    var tokensSheet = ss.getSheetByName('TOKENS');
+    if (tokensSheet) {
+      var lastRow = tokensSheet.getLastRow();
+      var lastCol = Math.max(tokensSheet.getLastColumn(), 28);
+      if (lastRow >= 2) {
+        var allValues = tokensSheet.getRange(1, 1, lastRow, lastCol).getDisplayValues();
+        var hdrRow = allValues[0];
+        // Build header index map
+        var hdrMap = {};
+        for (var h = 0; h < hdrRow.length; h++) {
+          hdrMap[String(hdrRow[h]).trim()] = h;
+        }
+        var iEmail   = (hdrMap['Email']         !== undefined) ? hdrMap['Email']         : -1;
+        var iEHash   = (hdrMap['Email Hash']     !== undefined) ? hdrMap['Email Hash']    : -1;
+        var iBrand   = (hdrMap['Brand']          !== undefined) ? hdrMap['Brand']         : -1;
+        var iText    = (hdrMap['Text For Email'] !== undefined) ? hdrMap['Text For Email']: -1;
+        var iStatus  = (hdrMap['Status']         !== undefined) ? hdrMap['Status']        : -1;
+        var iLocked  = (hdrMap['Locked']         !== undefined) ? hdrMap['Locked']        : 27; // AB fallback
+
+        if (iBrand !== -1 && iText !== -1 && iStatus !== -1) {
+          // Compute both hash formats for Email Hash column lookup
+          var emailHashHex = '';
+          var emailHashB64 = '';
+          try {
+            var hbytes = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, email);
+            emailHashHex = hbytes.map(function(b){ return ('0'+(b&0xFF).toString(16)).slice(-2); }).join('');
+            emailHashB64 = Utilities.base64Encode(hbytes);
+          } catch(he) {}
+
+          // Scan newest-to-oldest (bottom-up) and stop on first blocking match
+          var textLower = textForEmail.toLowerCase().trim();
+          for (var r = allValues.length - 1; r >= 1; r--) {
+            var dRow = allValues[r];
+            if (String(dRow[iBrand]).toUpperCase().trim() !== brand) continue;
+            if (String(dRow[iText]).toLowerCase().trim()  !== textLower) continue;
+
+            // Email match: direct OR hash
+            var emailMat = false;
+            if (iEmail !== -1 && String(dRow[iEmail]).toLowerCase().trim() === email) emailMat = true;
+            if (!emailMat && iEHash !== -1) {
+              var rh = String(dRow[iEHash]).trim();
+              if (rh && (rh === emailHashHex || rh === emailHashB64)) emailMat = true;
+            }
+            if (!emailMat) continue;
+
+            var rowStatus = String(dRow[iStatus]).toUpperCase().trim();
+            var rowLocked = String(dRow[iLocked]).toUpperCase().trim();
+
+            if (rowStatus === 'USED' || rowLocked === 'LOCKED') {
+              Logger.log('[INVITE_BLOCK] brand=%s email=%s textForEmail=%s row=%s status=%s locked=%s traceId=%s',
+                brand, email, textForEmail, r + 1, rowStatus, rowLocked, traceId);
+              logEvent_(traceId, brand, email, 'INVITE_BLOCKED', {
+                row: r + 1, status: rowStatus, locked: rowLocked
+              });
+              return {
+                ok: false,
+                code: 'INVITE_LOCKED',
+                error: 'This invite has already been used. Please contact support to request a new invitation.'
+              };
+            }
+            // First matching row found (no block) — stop scanning (newest wins)
+            break;
+          }
+        }
+      }
+    }
+  } catch (guardErr) {
+    // Fail-open: log but do not block legitimate candidates on guard error
+    Logger.log('[INVITE_GUARD_ERROR] %s traceId=%s', String(guardErr), traceId);
+  }
+  // ── END EARLY INVITE GUARD ────────────────────────────────────────────────
+
   // 1. Validate candidate against Smartsheet (brand-locked, ANY-sheet match)
   var searchResult = searchCandidateInSmartsheet_(brand, email, textForEmail);
   if (!searchResult.ok) {

@@ -40,6 +40,33 @@ function createOtp_(params) {
   if (!email || !brand || !textForEmail) {
     return { ok: false, error: 'Missing required parameters' };
   }
+
+  // BLOCK: Do not issue a new OTP/invite if an existing USED or LOCKED invite exists
+  // for the same Brand + Email + Text For Email.
+  try {
+    var ssPre = getConfigSheet_();
+    var shPre = ssPre.getSheetByName('TOKENS');
+    if (shPre) {
+      var block = findBlockingInviteInTokens_({
+        sheet: shPre,
+        brand: brand,
+        email: email,
+        textForEmail: textForEmail
+      });
+      if (block && block.blocked) {
+        Logger.log('[INVITE_BLOCK] brand=%s email=%s textForEmail=%s matchedRow=%s status=%s locked=%s',
+          brand, email, textForEmail, block.rowIndex, block.status || '', block.locked || '');
+        return {
+          ok: false,
+          code: 'INVITE_BLOCKED',
+          error: 'This invite has already been used. Please request a new OTP or contact support.'
+        };
+      }
+    }
+  } catch (e) {
+    // Fail-open on guard errors to avoid blocking legitimate invites.
+    Logger.log('[INVITE_BLOCK_GUARD_ERROR] %s', String(e));
+  }
   
   // Rate limiting removed: allow immediate OTP creation (for testing/development)
   // If you need to re-enable rate limiting, set a script property 'ENABLE_OTP_RATE_LIMIT' = 'true'
@@ -119,6 +146,10 @@ function createOtp_(params) {
   newRow[positionLinkIdx] = posLinkVal;
 
   sheet.appendRow(newRow);
+
+  try {
+    Logger.log('[INVITE_CREATE] brand=%s email=%s textForEmail=%s row=%s', brand, email, textForEmail, sheet.getLastRow());
+  } catch (e) {}
   
   logEvent_(traceId, brand, email, 'OTP_CREATED', { expiryMinutes: expiryMinutes });
   

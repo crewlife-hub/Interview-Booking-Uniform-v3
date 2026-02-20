@@ -304,7 +304,7 @@ function handleSendInvite_(params, traceId, adminEmail) {
   });
   
   if (!tokenResult.ok) {
-    return jsonResponse_({ ok: false, error: 'Failed to issue token' });
+    return jsonResponse_({ ok: false, error: tokenResult.error || 'Failed to issue token', code: tokenResult.code || '' });
   }
   
   // Send email
@@ -377,7 +377,7 @@ function handleReissue_(params, traceId, adminEmail) {
   });
   
   if (!tokenResult.ok) {
-    return jsonResponse_({ ok: false, error: 'Failed to issue new token' });
+    return jsonResponse_({ ok: false, error: tokenResult.error || 'Failed to issue new token', code: tokenResult.code || '' });
   }
   
   // Send email
