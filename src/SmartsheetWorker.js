@@ -12,6 +12,25 @@
  * ===========================================================================
  */
 
+// Sideways performance constants
+var SIDEWAYS_MAX_MS_PER_RUN = 330000; // ~5.5 minutes hard ceiling
+var SIDEWAYS_MAX_ROWS_TO_SCAN = 10000; // max rows to examine per sheet per run
+var SIDEWAYS_MAX_MATCHES = 60; // stop processing after this many Sideways hits
+var SIDEWAYS_PROGRESS_INTERVAL = 300; // progress log every N rows scanned
+
+/** Read the cursor index from ScriptProperties for a brand+sheet combo. */
+function getSidewaysCursor_(brand, sheetId) {
+  var key = 'SIDEWAYS_CURSOR_' + brand + '_' + sheetId;
+  var val = PropertiesService.getScriptProperties().getProperty(key);
+  return val ? Number(val) : 0;
+}
+
+/** Write the cursor index to ScriptProperties for a brand+sheet combo. */
+function setSidewaysCursor_(brand, sheetId, index) {
+  var key = 'SIDEWAYS_CURSOR_' + brand + '_' + sheetId;
+  PropertiesService.getScriptProperties().setProperty(key, String(index));
+}
+
 /**
  * Process rows across all brands (or single brand) where SEND == "Sideways".
  * @param {Object} opts - { brand: string|null, limit: number }
@@ -20,10 +39,18 @@
 function processSidewaysInvites_(opts) {
   opts = opts || {};
 
+  var runStart = Date.now();
+  var hitTimeGuard = false;
+
+  var scanned = 0;
+  var skippedSent = 0;
+  var matchedSideways = 0;
+  var sendAttempted = 0;
+
   var limit = (opts.limit === undefined || opts.limit === null || opts.limit === '')
-    ? Number.MAX_SAFE_INTEGER
+    ? SIDEWAYS_MAX_MATCHES
     : Number(opts.limit);
-  if (!isFinite(limit) || limit <= 0) limit = Number.MAX_SAFE_INTEGER;
+  if (!isFinite(limit) || limit <= 0) limit = SIDEWAYS_MAX_MATCHES;
 
   var brands = opts.brand ? [String(opts.brand).toUpperCase()] : getAllBrandCodes_();
 
@@ -41,6 +68,8 @@ function processSidewaysInvites_(opts) {
 
   try {
     for (var b = 0; b < brands.length; b++) {
+      if (results.processed >= limit) break;
+      if (Date.now() - runStart > SIDEWAYS_MAX_MS_PER_RUN) { hitTimeGuard = true; break; }
       var brand = String(brands[b]).toUpperCase();
       var sheetIds = getSmartsheetIdsForBrand_(brand);
       if (!sheetIds || sheetIds.length === 0) {
@@ -50,6 +79,8 @@ function processSidewaysInvites_(opts) {
       logEvent_(traceId, brand, '', 'SIDEWAYS_BRAND_SHEETS', { sheetIds: sheetIds, sheetCount: sheetIds.length });
 
       for (var s = 0; s < sheetIds.length; s++) {
+        if (results.processed >= limit) break;
+        if (Date.now() - runStart > SIDEWAYS_MAX_MS_PER_RUN) { hitTimeGuard = true; break; }
         var sheetId = sheetIds[s];
 
         // == SINGLE FETCH per sheet ======================================
@@ -159,8 +190,37 @@ function processSidewaysInvites_(opts) {
         var pendingUpdates = []; // collect for batch update
         var found = 0;
 
-        for (var r = 0; r < rows.length && results.processed < limit; r++) {
-          var row = rows[r];
+        var rowCount = rows.length;
+        var cursor = rowCount ? getSidewaysCursor_(brand, sheetId) : 0;
+        if (!rowCount || !isFinite(cursor) || cursor < 0 || cursor >= rowCount) cursor = 0;
+        var maxScans = Math.min(rowCount || 0, SIDEWAYS_MAX_ROWS_TO_SCAN);
+        var scannedThisSheet = 0;
+        var skippedSentThisSheet = 0;
+        var matchedSidewaysThisSheet = 0;
+        var sendAttemptedThisSheet = 0;
+
+        for (var iScan = 0; iScan < maxScans && results.processed < limit; iScan++) {
+          if (Date.now() - runStart > SIDEWAYS_MAX_MS_PER_RUN) { hitTimeGuard = true; break; }
+
+          var rIndex = (cursor + iScan) % rowCount;
+          var row = rows[rIndex];
+          scannedThisSheet++;
+          scanned++;
+
+          if (SIDEWAYS_PROGRESS_INTERVAL > 0 && (scanned % SIDEWAYS_PROGRESS_INTERVAL) === 0) {
+            var elapsedSec = Math.round((Date.now() - runStart) / 1000);
+            Logger.log(
+              '[SIDEWAYS_PROGRESS] brand=%s sheetId=%s scanned=%s processed=%s sidewaysFound=%s skippedSent=%s elapsedSec=%s',
+              brand,
+              sheetId,
+              scanned,
+              results.processed,
+              matchedSideways,
+              skippedSent,
+              elapsedSec
+            );
+          }
+
           var cells = row.cells || [];
           var rowMap = { rowId: row.id };
           var sendVal = '';
@@ -175,8 +235,8 @@ function processSidewaysInvites_(opts) {
           // -- IDEMPOTENCY: skip rows already sent ----------------------
           var sendLower = sendVal.toLowerCase();
           if (sendLower.indexOf('sent') !== -1 && sendLower !== 'sideways') {
-            Logger.log('[SIDEWAYS_SKIP_ALREADY_SENT] rowId=%s brand=%s sendVal=%s', row.id, brand, sendVal);
-            logEvent_(traceId, brand, '', 'SIDEWAYS_SKIP_ALREADY_SENT', { rowId: row.id, sendVal: sendVal });
+            skippedSentThisSheet++;
+            skippedSent++;
             results.skipped++;
             continue; // already processed (e.g. "🔔 Sent")
           }
@@ -184,6 +244,8 @@ function processSidewaysInvites_(opts) {
 
           results.processed++;
           found++;
+          matchedSidewaysThisSheet++;
+          matchedSideways++;
 
           var candidateEmail = rowMap[emailColName] || '';
           var textForEmail = rowMap[textForEmailCol] || '';
@@ -232,6 +294,9 @@ function processSidewaysInvites_(opts) {
             continue;
           }
 
+          sendAttemptedThisSheet++;
+          sendAttempted++;
+
           Logger.log('[OTP_CREATED] rowId=%s brand=%s email=%s', row.id, brand, candidateEmailNorm);
           logEvent_(traceId, brand, candidateEmailNorm, 'OTP_CREATED', { rowId: row.id });
 
@@ -264,6 +329,11 @@ function processSidewaysInvites_(opts) {
             cellsToUpdate.push({ columnId: Number(dateSentColId), value: new Date().toISOString() });
           }
           pendingUpdates.push({ id: Number(row.id), cells: cellsToUpdate });
+        }
+
+        if (rowCount) {
+          var newCursor = (cursor + scannedThisSheet) % rowCount;
+          setSidewaysCursor_(brand, sheetId, newCursor);
         }
 
         // == BATCH UPDATE SMARTSHEET =====================================
@@ -313,6 +383,36 @@ function processSidewaysInvites_(opts) {
     logEvent_(traceId, '', '', 'SIDEWAYS_EXCEPTION', { error: String(e), stack: e.stack });
     return { ok: false, error: String(e) };
   }
+
+  var elapsedSec = Math.round((Date.now() - runStart) / 1000);
+  Logger.log(
+    '[SIDEWAYS_RUN_SUMMARY] traceId=%s processed=%s scanned=%s skippedSent=%s sidewaysFound=%s sendAttempted=%s sent=%s updated=%s skipped=%s errors=%s elapsedSec=%s timeGuard=%s',
+    traceId,
+    results.processed,
+    scanned,
+    skippedSent,
+    matchedSideways,
+    sendAttempted,
+    results.sent,
+    results.updated,
+    results.skipped,
+    (results.errors || []).length,
+    elapsedSec,
+    hitTimeGuard
+  );
+  logEvent_(traceId, '', '', 'SIDEWAYS_RUN_SUMMARY', {
+    processed: results.processed,
+    scanned: scanned,
+    skippedSent: skippedSent,
+    sidewaysFound: matchedSideways,
+    sendAttempted: sendAttempted,
+    sent: results.sent,
+    updated: results.updated,
+    skipped: results.skipped,
+    errors: (results.errors || []).length,
+    elapsedSec: elapsedSec,
+    timeGuard: hitTimeGuard
+  });
 
   Logger.log('[SIDEWAYS_SUMMARY] processed=%s sent=%s updated=%s skipped=%s errors=%s', results.processed, results.sent, results.updated, results.skipped, (results.errors || []).length);
   logEvent_(traceId, '', '', 'SIDEWAYS_RUN_COMPLETE', results);
