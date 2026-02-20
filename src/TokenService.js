@@ -35,6 +35,16 @@ function hashEmail_(email) {
   return Utilities.base64Encode(hash);
 }
 
+function findHeaderIndex_(headers, headerName) {
+  if (!headers || !headers.length) return -1;
+  var needle = String(headerName || '').trim().toLowerCase();
+  if (!needle) return -1;
+  for (var i = 0; i < headers.length; i++) {
+    if (String(headers[i]).trim().toLowerCase() === needle) return i;
+  }
+  return -1;
+}
+
 /**
  * Issue a new token for a candidate
  * @param {Object} params - Token parameters
@@ -247,12 +257,13 @@ function isInviteLocked_(brand, emailHash, textForEmail) {
 
   // Read headers from full width so Locked column is always included
   var headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
-  var emailHashIdx = headers.indexOf('Email Hash');
-  var textForEmailIdx = headers.indexOf('Text For Email');
-  var brandIdx = headers.indexOf('Brand');
-  var lockedIdx = headers.indexOf('Locked');
+  var emailHashIdx = findHeaderIndex_(headers, 'Email Hash');
+  var textForEmailIdx = findHeaderIndex_(headers, 'Text For Email');
+  var brandIdx = findHeaderIndex_(headers, 'Brand');
+  var lockedIdx = findHeaderIndex_(headers, 'Locked');
 
   if (lockedIdx === -1) return false; // Locked column not created yet — not locked
+  if (emailHashIdx === -1 || textForEmailIdx === -1 || brandIdx === -1) return false;
 
   var data = sheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
   for (var i = 0; i < data.length; i++) {
@@ -291,10 +302,15 @@ function applyInviteLock_(brand, emailHash, textForEmail) {
 
     // Read headers from full width (getDataRange may stop short of Locked column)
     var headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
-    var emailHashIdx = headers.indexOf('Email Hash');
-    var textForEmailIdx = headers.indexOf('Text For Email');
-    var brandIdx = headers.indexOf('Brand');
-    var lockedIdx = headers.indexOf('Locked');
+    var emailHashIdx = findHeaderIndex_(headers, 'Email Hash');
+    var textForEmailIdx = findHeaderIndex_(headers, 'Text For Email');
+    var brandIdx = findHeaderIndex_(headers, 'Brand');
+    var lockedIdx = findHeaderIndex_(headers, 'Locked');
+
+    if (emailHashIdx === -1 || textForEmailIdx === -1 || brandIdx === -1) {
+      Logger.log('[INVITE_LOCK] Missing required columns (Email Hash/Text For Email/Brand). Cannot apply lock.');
+      return;
+    }
 
     // If Locked column doesn't exist yet, create it
     if (lockedIdx === -1) {
@@ -492,21 +508,37 @@ function consumeTokenForRedirect_(token, traceId) {
       return { ok: false, error: 'System not initialized', code: 'NO_TOKEN_SHEET' };
     }
 
-    var data = sheet.getDataRange().getValues();
-    if (data.length < 2) {
+    // Use explicit full-width header + data ranges (getDataRange can stop short)
+    var lastRow = sheet.getLastRow();
+    var lastCol = sheet.getLastColumn();
+    if (lastRow < 2) {
       return { ok: false, error: 'Token not found', code: 'NOT_FOUND' };
     }
-
-    var headers = data[0];
+    var headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
     var idx = {};
     for (var h = 0; h < headers.length; h++) {
-      idx[headers[h]] = h;
+      idx[String(headers[h]).trim()] = h;
     }
+
+    var tokenIdx = findHeaderIndex_(headers, 'Token');
+    var statusIdx = findHeaderIndex_(headers, 'Status');
+    var expiryIdx = findHeaderIndex_(headers, 'Expiry');
+    var brandIdx = findHeaderIndex_(headers, 'Brand');
+    var textForEmailIdx = findHeaderIndex_(headers, 'Text For Email');
+    var emailHashIdx = findHeaderIndex_(headers, 'Email Hash');
+    var usedAtIdx = findHeaderIndex_(headers, 'Used At');
+    var positionLinkIdx = findHeaderIndex_(headers, 'Position Link');
+
+    if (tokenIdx === -1 || statusIdx === -1 || expiryIdx === -1 || brandIdx === -1 || textForEmailIdx === -1) {
+      return { ok: false, error: 'Token sheet headers are misconfigured', code: 'NO_TOKEN_SHEET' };
+    }
+
+    var data = sheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
 
     // Find token row
     var targetRow = -1;
-    for (var i = 1; i < data.length; i++) {
-      if (String(data[i][idx['Token']]) === token) {
+    for (var i = 0; i < data.length; i++) {
+      if (String(data[i][tokenIdx]) === token) {
         targetRow = i;
         break;
       }
@@ -517,9 +549,9 @@ function consumeTokenForRedirect_(token, traceId) {
     }
 
     var row = data[targetRow];
-    var status = String(row[idx['Status']] || '');
-    var expiry = new Date(row[idx['Expiry']]);
-    var sheetRow = targetRow + 1;
+    var status = String(row[statusIdx] || '');
+    var expiry = new Date(row[expiryIdx]);
+    var sheetRow = targetRow + 2;
 
     // Already used — hard block
     if (status === 'USED') {
@@ -540,14 +572,13 @@ function consumeTokenForRedirect_(token, traceId) {
     }
 
     // Extract metadata for logging
-    var brand = String(row[idx['Brand']] || '');
-    var textForEmail = String(row[idx['Text For Email']] || '');
+    var brand = String(row[brandIdx] || '');
+    var textForEmail = String(row[textForEmailIdx] || '');
     var clCodeMatch = textForEmail.match(/CL\d+/i);
     var clCode = clCodeMatch ? clCodeMatch[0].toUpperCase() : 'UNKNOWN';
 
     // Get booking URL: prefer Position Link (per-candidate), fall back to CL_CODES sheet
-    var posLinkIdx = idx['Position Link'];
-    var rawBookingUrl = (posLinkIdx !== undefined) ? String(row[posLinkIdx] || '') : '';
+    var rawBookingUrl = (positionLinkIdx !== -1) ? String(row[positionLinkIdx] || '') : '';
     var urlSource = 'Position Link';
 
     // Fallback: if Position Link empty, try CL_CODES sheet Booking Schedule URL
@@ -649,9 +680,21 @@ function consumeTokenForRedirect_(token, traceId) {
     }
 
     // === ATOMIC: Mark USED + set Used At BEFORE returning booking URL ===
-    sheet.getRange(sheetRow, idx['Status'] + 1).setValue('USED');
-    if (idx['Used At'] !== undefined) {
-      sheet.getRange(sheetRow, idx['Used At'] + 1).setValue(new Date());
+    sheet.getRange(sheetRow, statusIdx + 1).setValue('USED');
+    if (usedAtIdx !== -1) {
+      sheet.getRange(sheetRow, usedAtIdx + 1).setValue(new Date());
+    }
+
+    // Apply invite lock (prevents issuing new OTPs for same invite)
+    if (emailHashIdx !== -1) {
+      var emailHash = String(row[emailHashIdx] || '').trim();
+      if (emailHash) {
+        applyInviteLock_(brand, emailHash, textForEmail);
+      } else {
+        Logger.log('[INVITE_LOCK] Missing Email Hash on token row; cannot lock. token=%s', token.substring(0, 8) + '...');
+      }
+    } else {
+      Logger.log('[INVITE_LOCK] Email Hash column not found; cannot lock.');
     }
 
     logEvent_(traceId, brand, '', 'TOKEN_CONSUMED', {
