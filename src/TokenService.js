@@ -440,9 +440,24 @@ function consumeTokenForRedirect_(token, traceId) {
     var clCodeMatch = textForEmail.match(/CL\d+/i);
     var clCode = clCodeMatch ? clCodeMatch[0].toUpperCase() : 'UNKNOWN';
 
-    // Get booking URL from Position Link
+    // Get booking URL: prefer Position Link (per-candidate), fall back to CL_CODES sheet
     var posLinkIdx = idx['Position Link'];
     var rawBookingUrl = (posLinkIdx !== undefined) ? String(row[posLinkIdx] || '') : '';
+    var urlSource = 'Position Link';
+
+    // Fallback: if Position Link empty, try CL_CODES sheet Booking Schedule URL
+    if (!rawBookingUrl && clCode !== 'UNKNOWN') {
+      try {
+        var clDetails = getCLCodeDetails_(brand, clCode);
+        if (clDetails && clDetails.bookingUrl) {
+          rawBookingUrl = String(clDetails.bookingUrl);
+          urlSource = 'CL_CODES';
+          Logger.log('[REDIRECT_DEBUG] Position Link empty — fell back to CL_CODES for %s', clCode);
+        }
+      } catch (clErr) {
+        Logger.log('[REDIRECT_DEBUG] CL_CODES fallback error: %s', String(clErr));
+      }
+    }
     
     // --- NORMALIZE URL: Remove /u/{n}/ to get public booking link ---
     // This prevents "Verify it's you" when redirecting candidates
@@ -450,15 +465,16 @@ function consumeTokenForRedirect_(token, traceId) {
 
     // --- DETAILED LOGGING ---
     Logger.log('[REDIRECT_DEBUG] traceId=%s clCode=%s brand=%s', traceId, clCode, brand);
-    Logger.log('[REDIRECT_DEBUG] Position Link RAW: %s', rawBookingUrl || '(empty)');
-    Logger.log('[REDIRECT_DEBUG] Position Link NORMALIZED: %s', bookingUrl || '(empty)');
+    Logger.log('[REDIRECT_DEBUG] URL source: %s', urlSource);
+    Logger.log('[REDIRECT_DEBUG] RAW URL: %s', rawBookingUrl || '(empty)');
+    Logger.log('[REDIRECT_DEBUG] NORMALIZED URL: %s', bookingUrl || '(empty)');
     if (rawBookingUrl !== bookingUrl) {
       Logger.log('[REDIRECT_DEBUG] URL was normalized (removed /u/{n}/ segment)');
     }
 
     // Validate booking URL — must not be empty
     if (!bookingUrl) {
-      logEvent_(traceId, brand, '', 'REDIRECT_BLOCKED', { reason: 'Position Link empty', clCode: clCode });
+      logEvent_(traceId, brand, '', 'REDIRECT_BLOCKED', { reason: 'Booking URL empty (Position Link + CL_CODES)', clCode: clCode });
       return { ok: false, error: 'Booking link not configured. Please contact your recruiter.', code: 'NO_BOOKING_URL' };
     }
 
