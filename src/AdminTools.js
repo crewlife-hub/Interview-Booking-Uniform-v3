@@ -196,14 +196,18 @@ function removeProcessSidewaysTrigger() {
 }
 
 /**
- * MANUAL RUNNER: Process Sideways for a single brand (for testing)
+ * MANUAL RUNNER: Process Sideways for a single brand.
  *
- * Defaults to dry-run mode (sends to testEmail) to avoid spamming candidates.
+ * Flags:
+ *   dryRun  (default true)  — true = log-only, NO emails, NO Smartsheet writes
+ *                            — false = send real emails, update Smartsheet
+ *   limit   (optional)      — max rows to process
+ *
+ * NO testEmail — emails always go to the real candidate address.
  *
  * @param {string} brand - e.g. ROYAL, COSTA, SEACHEFS
  * @param {Object=} opts
  * @param {boolean=} opts.dryRun - default true
- * @param {string=} opts.testEmail - default info@crewlifeatsea.com (when dryRun)
  * @param {number=} opts.limit - default 200
  * @returns {Object} worker result
  */
@@ -217,27 +221,26 @@ function runSidewaysForBrand(brand, opts) {
   }
 
   var dryRun = (opts.dryRun === undefined) ? true : !!opts.dryRun;
-  var testEmail = opts.testEmail || null;
 
-  if (dryRun && !testEmail) testEmail = 'info@crewlifeatsea.com';
-
-  var workerOpts = { brand: b, dryRun: dryRun, testEmail: testEmail };
-  if (opts.updateSheet !== undefined && opts.updateSheet !== null) {
-    workerOpts.updateSheet = !!opts.updateSheet;
-  }
+  var workerOpts = { brand: b, dryRun: dryRun };
   if (opts.limit !== undefined && opts.limit !== null && opts.limit !== '') {
     workerOpts.limit = Number(opts.limit);
   }
 
-  Logger.log('runSidewaysForBrand: brand=%s dryRun=%s testEmail=%s limit=%s', b, dryRun, testEmail || '(none)', workerOpts.limit === undefined ? '(none)' : workerOpts.limit);
+  Logger.log('runSidewaysForBrand: brand=%s dryRun=%s limit=%s', b, dryRun, workerOpts.limit === undefined ? '(none)' : workerOpts.limit);
   var res = processSidewaysInvites_(workerOpts);
   Logger.log('runSidewaysForBrand: result=%s', JSON.stringify(res));
   return res;
 }
 
-// Convenience helpers for quick testing from the Apps Script UI
+// Convenience helpers: DRY-RUN (log-only, no emails, no updates)
 function runSideways_ROYAL() {
-  return runSidewaysForBrand('ROYAL', { dryRun: true, testEmail: 'info@crewlifeatsea.com', updateSheet: true });
+  return runSidewaysForBrand('ROYAL', { dryRun: true });
+}
+
+// Convenience helpers: LIVE (real emails, real Smartsheet updates)
+function runSidewaysLive_ROYAL() {
+  return runSidewaysForBrand('ROYAL', { dryRun: false });
 }
 
 /**
@@ -272,9 +275,15 @@ function dumpSheetColumns_COSTA() { return dumpSheetColumns('COSTA'); }
 function dumpSheetColumns_SEACHEFS() { return dumpSheetColumns('SEACHEFS'); }
 
 function runSideways_COSTA() {
-  return runSidewaysForBrand('COSTA', { dryRun: true, testEmail: 'info@crewlifeatsea.com', updateSheet: true });
+  return runSidewaysForBrand('COSTA', { dryRun: true });
+}
+function runSidewaysLive_COSTA() {
+  return runSidewaysForBrand('COSTA', { dryRun: false });
 }
 
 function runSideways_SEACHEFS() {
-  return runSidewaysForBrand('SEACHEFS', { dryRun: true, testEmail: 'info@crewlifeatsea.com', updateSheet: true });
+  return runSidewaysForBrand('SEACHEFS', { dryRun: true });
+}
+function runSidewaysLive_SEACHEFS() {
+  return runSidewaysForBrand('SEACHEFS', { dryRun: false });
 }

@@ -117,10 +117,9 @@ function doPost(e) {
     // This processes Smartsheet rows with SEND Interview Invite = "Sideways"
     if (action === 'processsideways') {
       var dry = params.dryRun === 'true' || params.dryRun === true;
-      var testEmail = params.testEmail || null;
       var brand = params.brand || null;
       var limit = params.limit ? Number(params.limit) : undefined;
-      var res = processSidewaysInvites_({ dryRun: dry, testEmail: testEmail, brand: brand, limit: limit });
+      var res = processSidewaysInvites_({ dryRun: dry, brand: brand, limit: limit });
       return jsonResponse_(res);
     }
 
