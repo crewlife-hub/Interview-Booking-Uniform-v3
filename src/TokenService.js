@@ -241,18 +241,21 @@ function isInviteLocked_(brand, emailHash, textForEmail) {
   var sheet = ss.getSheetByName('TOKENS');
   if (!sheet) return false;
 
-  var data = sheet.getDataRange().getValues();
-  if (data.length < 2) return false;
+  var lastRow = sheet.getLastRow();
+  var lastCol = sheet.getLastColumn();
+  if (lastRow < 2 || lastCol < 1) return false;
 
-  var headers = data[0];
+  // Read headers from full width so Locked column is always included
+  var headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
   var emailHashIdx = headers.indexOf('Email Hash');
   var textForEmailIdx = headers.indexOf('Text For Email');
   var brandIdx = headers.indexOf('Brand');
   var lockedIdx = headers.indexOf('Locked');
 
-  if (lockedIdx === -1) return false;
+  if (lockedIdx === -1) return false; // Locked column not created yet — not locked
 
-  for (var i = 1; i < data.length; i++) {
+  var data = sheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
+  for (var i = 0; i < data.length; i++) {
     var rowHash = String(data[i][emailHashIdx]);
     var hashMatch = false;
     for (var h = 0; h < hashes.length; h++) {
@@ -277,27 +280,51 @@ function isInviteLocked_(brand, emailHash, textForEmail) {
  * @param {string} textForEmail - Text For Email
  */
 function applyInviteLock_(brand, emailHash, textForEmail) {
-  var ss = getConfigSheet_();
-  var sheet = ss.getSheetByName('TOKENS');
-  if (!sheet) return;
+  try {
+    var ss = getConfigSheet_();
+    var sheet = ss.getSheetByName('TOKENS');
+    if (!sheet) { Logger.log('[INVITE_LOCK] TOKENS sheet not found'); return; }
 
-  var data = sheet.getDataRange().getValues();
-  if (data.length < 2) return;
+    var lastRow = sheet.getLastRow();
+    var lastCol = sheet.getLastColumn();
+    if (lastRow < 2 || lastCol < 1) { Logger.log('[INVITE_LOCK] Sheet empty'); return; }
 
-  var headers = data[0];
-  var emailHashIdx = headers.indexOf('Email Hash');
-  var textForEmailIdx = headers.indexOf('Text For Email');
-  var brandIdx = headers.indexOf('Brand');
-  var lockedIdx = headers.indexOf('Locked');
+    // Read headers from full width (getDataRange may stop short of Locked column)
+    var headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+    var emailHashIdx = headers.indexOf('Email Hash');
+    var textForEmailIdx = headers.indexOf('Text For Email');
+    var brandIdx = headers.indexOf('Brand');
+    var lockedIdx = headers.indexOf('Locked');
 
-  if (lockedIdx === -1) return;
-
-  for (var i = 1; i < data.length; i++) {
-    if (String(data[i][emailHashIdx]) === String(emailHash) &&
-        String(data[i][textForEmailIdx]).trim() === String(textForEmail).trim() &&
-        String(data[i][brandIdx]).toUpperCase() === String(brand).toUpperCase()) {
-      sheet.getRange(i + 1, lockedIdx + 1).setValue('LOCKED');
+    // If Locked column doesn't exist yet, create it
+    if (lockedIdx === -1) {
+      lockedIdx = lastCol; // 0-based index = lastCol means column lastCol+1
+      sheet.getRange(1, lastCol + 1).setValue('Locked');
+      lastCol = lastCol + 1;
+      Logger.log('[INVITE_LOCK] Created Locked header at column %s', lastCol);
     }
+
+    Logger.log('[INVITE_LOCK] brand=%s hash=%s tfe=%s lockedCol=%s rows=%s',
+      brand, String(emailHash).substring(0, 12) + '...', String(textForEmail).substring(0, 30), lockedIdx + 1, lastRow - 1);
+
+    // Read data from all rows and relevant columns
+    var data = sheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
+    var lockCount = 0;
+    for (var i = 0; i < data.length; i++) {
+      if (String(data[i][emailHashIdx]) === String(emailHash) &&
+          String(data[i][textForEmailIdx]).trim() === String(textForEmail).trim() &&
+          String(data[i][brandIdx]).toUpperCase() === String(brand).toUpperCase()) {
+        var current = String(data[i][lockedIdx] || '').toUpperCase().trim();
+        if (current !== 'LOCKED') {
+          sheet.getRange(i + 2, lockedIdx + 1).setValue('LOCKED');
+          lockCount++;
+        }
+      }
+    }
+
+    Logger.log('[INVITE_LOCK] Applied LOCKED to %s rows for brand=%s', lockCount, brand);
+  } catch (e) {
+    Logger.log('[INVITE_LOCK] ERROR: %s', String(e));
   }
 }
 
