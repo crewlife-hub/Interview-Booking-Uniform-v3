@@ -51,7 +51,7 @@ function setupWebApp() {
   
   // Step 2: Set the web app URL to the known deployment
   Logger.log('Step 2: Setting web app URL...');
-  var webAppUrl = 'https://script.google.com/macros/s/AKfycbz5YyCDdmGnKZaMyv47Xu6MWVy6JhU7_R3yLtBePkYP131iIrIp1ptX0l5hJipUVtL4RA/exec';
+  var webAppUrl = 'https://script.google.com/macros/s/AKfycbx-IEEieMEvXPf0cXC_R_y6KKtWOMkA2nXJkU1mu8XlIMY7MnCn5eamrzjzvre0frZm0Q/exec';
   try {
     var props = PropertiesService.getScriptProperties();
     props.setProperty('WEB_APP_EXEC_URL', webAppUrl);
@@ -143,5 +143,141 @@ function runDiagOnce() {
     Logger.log('runDiagOnce: error=%s', String(e));
     return { ok: false, error: String(e) };
   }
+}
 
+/**
+ * INSTALL TIME-BASED TRIGGER for processSidewaysInvites_
+ * ---------------------------------------------------------------------------
+ * Run this function ONCE from the Apps Script editor to create the trigger.
+ * It will fire every 5 minutes, scan all brand Smartsheets for rows where
+ * "SEND Interview Invite" = "Sideways", send the token-gated booking email,
+ * and mark the row "🔔Sent".
+ *
+ * Safe to run multiple times — removes any duplicate triggers first.
+ */
+function installProcessSidewaysTrigger() {
+  // Remove any existing triggers for this function to avoid duplicates
+  var existing = ScriptApp.getProjectTriggers();
+  for (var i = 0; i < existing.length; i++) {
+    var handler = existing[i].getHandlerFunction();
+    if (handler === 'processSidewaysInvitesScheduled_' || handler === 'processSidewaysInvites_') {
+      ScriptApp.deleteTrigger(existing[i]);
+      Logger.log('Removed existing trigger: ' + existing[i].getUniqueId());
+    }
+  }
+
+  // Create new every-5-minute trigger
+  var trigger = ScriptApp.newTrigger('processSidewaysInvitesScheduled_')
+    .timeBased()
+    .everyMinutes(5)
+    .create();
+
+  Logger.log('✅ Trigger installed: processSidewaysInvitesScheduled_ every 5 minutes (ID: ' + trigger.getUniqueId() + ')');
+  Logger.log('Go to Triggers page in Apps Script to confirm.');
+  return { ok: true, triggerId: trigger.getUniqueId(), interval: '5 minutes' };
+}
+
+/**
+ * REMOVE the time-based trigger for processSidewaysInvites_
+ * Run this if you want to pause the automated sending.
+ */
+function removeProcessSidewaysTrigger() {
+  var existing = ScriptApp.getProjectTriggers();
+  var removed = 0;
+  for (var i = 0; i < existing.length; i++) {
+    var handler = existing[i].getHandlerFunction();
+    if (handler === 'processSidewaysInvitesScheduled_' || handler === 'processSidewaysInvites_') {
+      ScriptApp.deleteTrigger(existing[i]);
+      removed++;
+    }
+  }
+  Logger.log('Removed ' + removed + ' trigger(s) for processSidewaysInvites_');
+  return { ok: true, removed: removed };
+}
+
+/**
+ * MANUAL RUNNER: Process Sideways for a single brand.
+ *
+ * Flags:
+ *   limit   (optional)      — max rows to process
+ *
+ * NO testEmail — emails always go to the real candidate address.
+ *
+ * @param {string} brand - e.g. ROYAL, COSTA, SEACHEFS
+ * @param {Object=} opts
+ * @param {number=} opts.limit - default 200
+ * @returns {Object} worker result
+ */
+function runSidewaysForBrand(brand, opts) {
+  opts = opts || {};
+
+  var b = String(brand || '').toUpperCase().trim();
+  if (!b) {
+    Logger.log('ERROR: brand is required. Use runSideways_ROYAL(), runSideways_COSTA(), or runSideways_SEACHEFS() instead.');
+    return { ok: false, error: 'brand is required (e.g. ROYAL)' };
+  }
+
+  var workerOpts = { brand: b };
+  if (opts.limit !== undefined && opts.limit !== null && opts.limit !== '') {
+    workerOpts.limit = Number(opts.limit);
+  }
+
+  Logger.log('runSidewaysForBrand: brand=%s limit=%s', b, workerOpts.limit === undefined ? '(none)' : workerOpts.limit);
+  var res = processSidewaysInvites_(workerOpts);
+  Logger.log('runSidewaysForBrand: result=%s', JSON.stringify(res));
+  return res;
+}
+
+// Convenience helpers (always LIVE)
+function runSideways_ROYAL() {
+  return runSidewaysForBrand('ROYAL');
+}
+
+function runSidewaysLive_ROYAL() {
+  return runSidewaysForBrand('ROYAL');
+}
+
+/**
+ * DIAGNOSTIC: Dump all column IDs and titles for a brand's Smartsheet.
+ * Run this from the editor to find the exact column IDs you need.
+ * Usage: dumpSheetColumns_ROYAL()  or  dumpSheetColumns('ROYAL')
+ */
+function dumpSheetColumns(brand) {
+  var b = getBrand_(String(brand || '').toUpperCase());
+  if (!b) { Logger.log('Unknown brand: ' + brand); return; }
+  var cfg = getConfig_();
+  var apiToken = cfg.SMARTSHEET_API_TOKEN;
+  if (!apiToken) { Logger.log('No SMARTSHEET_API_TOKEN'); return; }
+  var sheetId = b.smartsheetId;
+  Logger.log('=== Columns for ' + brand + ' sheet ' + sheetId + ' ===');
+  var sheetData = fetchSmartsheet_(sheetId, apiToken);
+  if (!sheetData.ok) { Logger.log('Fetch failed: ' + sheetData.error); return; }
+  var cols = sheetData.columns || [];
+  for (var i = 0; i < cols.length; i++) {
+    var c = cols[i];
+    var info = 'COL[' + i + ']  id: ' + c.id + '  title: "' + c.title + '"';
+    if (c.formula) info += '  [HAS FORMULA]';
+    if (c.type) info += '  type: ' + c.type;
+    Logger.log(info);
+  }
+  Logger.log('=== Total: ' + cols.length + ' columns ===');
+  return cols.length;
+}
+
+function dumpSheetColumns_ROYAL() { return dumpSheetColumns('ROYAL'); }
+function dumpSheetColumns_COSTA() { return dumpSheetColumns('COSTA'); }
+function dumpSheetColumns_SEACHEFS() { return dumpSheetColumns('SEACHEFS'); }
+
+function runSideways_COSTA() {
+  return runSidewaysForBrand('COSTA');
+}
+function runSidewaysLive_COSTA() {
+  return runSidewaysForBrand('COSTA');
+}
+
+function runSideways_SEACHEFS() {
+  return runSidewaysForBrand('SEACHEFS');
+}
+function runSidewaysLive_SEACHEFS() {
+  return runSidewaysForBrand('SEACHEFS');
 }

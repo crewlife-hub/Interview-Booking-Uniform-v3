@@ -111,25 +111,24 @@
       
       <div id="successSection" class="hidden">
         <div class="success-box">
-          <h2>🎉 Congratulations!</h2>
+          <h2>🎉 Verified!</h2>
           <p>Your passcode has been verified successfully.</p>
           <p id="emailSentMsg" class="hidden" style="color: #155724; font-weight: 500;">
-            📧 We've also sent you an email with the booking link.
+            📧 We've also sent you a confirmation email.
           </p>
         </div>
         
         <div class="booking-info">
           <p><strong>Position:</strong> <span id="positionText"><?= textForEmail ?></span></p>
-          <p id="recruiterInfo" class="hidden"><strong>Recruiter:</strong> <span id="recruiterName"></span></p>
         </div>
         
         <p style="text-align: center; color: #666;">
-          <strong>Please note:</strong> This booking link is valid for 10 minutes and can only be used once.
+          <strong>Important:</strong> This access link can only be used <strong>once</strong>. Once clicked, it cannot be reopened or shared.
         </p>
         
         <div style="text-align: center; margin: 20px 0;">
-          <a href="#" id="bookingLink" class="btn btn-success" style="padding: 15px 40px; font-size: 18px; text-decoration: none;">
-            📅 Schedule Your Interview
+          <a href="#" id="bookingLink" class="btn btn-success" target="_blank" rel="noopener noreferrer" style="padding: 15px 40px; font-size: 18px; text-decoration: none;">
+            📅 Access Interview Booking
           </a>
         </div>
       </div>
@@ -388,10 +387,12 @@
           updateServerResponseDebug(result);
 
           if (result.ok && result.verified) {
-            if (result.bookingUrl) {
+            if (result.accessUrl) {
               showSuccess(result);
+            } else if (result.error) {
+              showClError(result.error);
             } else {
-              showClError(result.error || 'Booking URL not configured for this position');
+              showClError('Booking access not configured for this position');
             }
           } else {
             // Build detailed error message with diagnostics
@@ -476,15 +477,19 @@
       if (result.textForEmail) {
         document.getElementById('positionText').textContent = result.textForEmail;
       }
-      if (result.recruiterName) {
-        document.getElementById('recruiterName').textContent = result.recruiterName;
-        document.getElementById('recruiterInfo').classList.remove('hidden');
-      }
       if (result.emailSent) {
         document.getElementById('emailSentMsg').classList.remove('hidden');
       }
       
-      document.getElementById('bookingLink').href = result.bookingUrl;
+      // Point to the secure access URL (web app confirm gate), never the calendar URL
+      var bookingLink = document.getElementById('bookingLink');
+      bookingLink.href = result.accessUrl;
+      bookingLink.target = '_blank';
+      bookingLink.rel = 'noopener noreferrer';
+      bookingLink.onclick = function(evt) {
+        evt.preventDefault();
+        window.open(result.accessUrl, '_blank', 'noopener,noreferrer');
+      };
     }
     
     function showClError(msg) {

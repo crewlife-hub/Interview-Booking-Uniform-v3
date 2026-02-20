@@ -214,6 +214,9 @@ function confirmTokenAndMarkUsed_(token, traceId) {
     redirectUrl: maskUrl_(validation.bookingUrl)
   });
   
+  // Apply invite lock to all matching rows
+  applyInviteLock_(validation.brand, validation.emailHash, validation.textForEmail);
+
   return {
     ok: true,
     redirectUrl: validation.bookingUrl,
@@ -221,6 +224,81 @@ function confirmTokenAndMarkUsed_(token, traceId) {
     clCode: validation.clCode,
     textForEmail: validation.textForEmail
   };
+}
+
+/**
+ * Check if an invitation is locked (booking already completed).
+ * Reads the TOKENS sheet live on every call (no caching).
+ * Admin can type "UNLOCK" in the Locked column to allow reuse.
+ * @param {string} brand - Brand code
+ * @param {string|string[]} emailHash - Email hash (or array of hashes) to match
+ * @param {string} textForEmail - Text For Email
+ * @returns {boolean} True if locked
+ */
+function isInviteLocked_(brand, emailHash, textForEmail) {
+  var hashes = Array.isArray(emailHash) ? emailHash : [emailHash];
+  var ss = getConfigSheet_();
+  var sheet = ss.getSheetByName('TOKENS');
+  if (!sheet) return false;
+
+  var data = sheet.getDataRange().getValues();
+  if (data.length < 2) return false;
+
+  var headers = data[0];
+  var emailHashIdx = headers.indexOf('Email Hash');
+  var textForEmailIdx = headers.indexOf('Text For Email');
+  var brandIdx = headers.indexOf('Brand');
+  var lockedIdx = headers.indexOf('Locked');
+
+  if (lockedIdx === -1) return false;
+
+  for (var i = 1; i < data.length; i++) {
+    var rowHash = String(data[i][emailHashIdx]);
+    var hashMatch = false;
+    for (var h = 0; h < hashes.length; h++) {
+      if (rowHash === String(hashes[h])) { hashMatch = true; break; }
+    }
+    if (hashMatch &&
+        String(data[i][textForEmailIdx]).trim() === String(textForEmail).trim() &&
+        String(data[i][brandIdx]).toUpperCase() === String(brand).toUpperCase() &&
+        String(data[i][lockedIdx]).toUpperCase() === 'LOCKED') {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Apply invite lock to all matching rows after a token reaches USED.
+ * Writes "LOCKED" to the Locked column for every row matching
+ * the given emailHash + textForEmail + brand.
+ * @param {string} brand - Brand code
+ * @param {string} emailHash - Email hash to match
+ * @param {string} textForEmail - Text For Email
+ */
+function applyInviteLock_(brand, emailHash, textForEmail) {
+  var ss = getConfigSheet_();
+  var sheet = ss.getSheetByName('TOKENS');
+  if (!sheet) return;
+
+  var data = sheet.getDataRange().getValues();
+  if (data.length < 2) return;
+
+  var headers = data[0];
+  var emailHashIdx = headers.indexOf('Email Hash');
+  var textForEmailIdx = headers.indexOf('Text For Email');
+  var brandIdx = headers.indexOf('Brand');
+  var lockedIdx = headers.indexOf('Locked');
+
+  if (lockedIdx === -1) return;
+
+  for (var i = 1; i < data.length; i++) {
+    if (String(data[i][emailHashIdx]) === String(emailHash) &&
+        String(data[i][textForEmailIdx]).trim() === String(textForEmail).trim() &&
+        String(data[i][brandIdx]).toUpperCase() === String(brand).toUpperCase()) {
+      sheet.getRange(i + 1, lockedIdx + 1).setValue('LOCKED');
+    }
+  }
 }
 
 /**
@@ -302,4 +380,267 @@ function getTokenHistory_(email, brand) {
     }
   }
   return results;
+}
+
+/**
+ * Peek at a token's current status without modifying anything.
+ * Used by the confirm gate page to verify the token is still valid before showing UI.
+ * @param {string} token - Token string
+ * @returns {Object} { ok, status, brand, textForEmail, error, code }
+ */
+function peekToken_(token) {
+  if (!token) {
+    return { ok: false, error: 'Missing token', code: 'MISSING_TOKEN' };
+  }
+
+  var ss = getConfigSheet_();
+  var sheet = ss.getSheetByName('TOKENS');
+  if (!sheet) {
+    return { ok: false, error: 'System not initialized', code: 'NO_TOKEN_SHEET' };
+  }
+
+  var data = sheet.getDataRange().getValues();
+  if (data.length < 2) {
+    return { ok: false, error: 'Token not found', code: 'NOT_FOUND' };
+  }
+
+  var headers = data[0];
+  var idx = {};
+  for (var h = 0; h < headers.length; h++) {
+    idx[headers[h]] = h;
+  }
+
+  for (var i = 1; i < data.length; i++) {
+    if (String(data[i][idx['Token']]) === token) {
+      var row = data[i];
+      var status = String(row[idx['Status']] || '');
+      var expiry = new Date(row[idx['Expiry']]);
+
+      if (status === 'USED') {
+        return { ok: false, error: 'This link has already been used. Please request a new OTP.', code: 'ALREADY_USED' };
+      }
+      if (new Date() > expiry) {
+        return { ok: false, error: 'This link has expired. Please request a new OTP.', code: 'EXPIRED' };
+      }
+      if (status !== 'VERIFIED') {
+        return { ok: false, error: 'This link is not ready. Please verify your OTP first.', code: 'NOT_VERIFIED' };
+      }
+
+      return {
+        ok: true,
+        status: status,
+        brand: String(row[idx['Brand']] || ''),
+        textForEmail: String(row[idx['Text For Email']] || '')
+      };
+    }
+  }
+
+  return { ok: false, error: 'Token not found or invalid', code: 'NOT_FOUND' };
+}
+
+/**
+ * Consume a VERIFIED token for one-time redirect.
+ * Uses LockService for atomicity — marks USED + sets Used At BEFORE returning the booking URL.
+ * After this call, any subsequent access with the same token will get ALREADY_USED.
+ * @param {string} token - Token string
+ * @param {string} traceId - Trace ID
+ * @returns {Object} { ok, bookingUrl, brand, textForEmail, error, code }
+ */
+function consumeTokenForRedirect_(token, traceId) {
+  if (!token) {
+    return { ok: false, error: 'Missing token', code: 'MISSING_TOKEN' };
+  }
+
+  var lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(10000);
+  } catch (e) {
+    return { ok: false, error: 'System busy. Please try again.', code: 'LOCK_TIMEOUT' };
+  }
+
+  try {
+    var ss = getConfigSheet_();
+    var sheet = ss.getSheetByName('TOKENS');
+    if (!sheet) {
+      return { ok: false, error: 'System not initialized', code: 'NO_TOKEN_SHEET' };
+    }
+
+    var data = sheet.getDataRange().getValues();
+    if (data.length < 2) {
+      return { ok: false, error: 'Token not found', code: 'NOT_FOUND' };
+    }
+
+    var headers = data[0];
+    var idx = {};
+    for (var h = 0; h < headers.length; h++) {
+      idx[headers[h]] = h;
+    }
+
+    // Find token row
+    var targetRow = -1;
+    for (var i = 1; i < data.length; i++) {
+      if (String(data[i][idx['Token']]) === token) {
+        targetRow = i;
+        break;
+      }
+    }
+
+    if (targetRow === -1) {
+      return { ok: false, error: 'Token not found or invalid', code: 'NOT_FOUND' };
+    }
+
+    var row = data[targetRow];
+    var status = String(row[idx['Status']] || '');
+    var expiry = new Date(row[idx['Expiry']]);
+    var sheetRow = targetRow + 1;
+
+    // Already used — hard block
+    if (status === 'USED') {
+      return { ok: false, error: 'This link has already been used. Please request a new OTP.', code: 'ALREADY_USED' };
+    }
+
+    // Expired
+    if (new Date() > expiry) {
+      if (status !== 'EXPIRED') {
+        sheet.getRange(sheetRow, idx['Status'] + 1).setValue('EXPIRED');
+      }
+      return { ok: false, error: 'This link has expired. Please request a new OTP.', code: 'EXPIRED' };
+    }
+
+    // Must be VERIFIED (OTP was verified)
+    if (status !== 'VERIFIED') {
+      return { ok: false, error: 'This link is not ready. Please verify your OTP first.', code: 'NOT_VERIFIED' };
+    }
+
+    // Extract metadata for logging
+    var brand = String(row[idx['Brand']] || '');
+    var textForEmail = String(row[idx['Text For Email']] || '');
+    var clCodeMatch = textForEmail.match(/CL\d+/i);
+    var clCode = clCodeMatch ? clCodeMatch[0].toUpperCase() : 'UNKNOWN';
+
+    // Get booking URL: prefer Position Link (per-candidate), fall back to CL_CODES sheet
+    var posLinkIdx = idx['Position Link'];
+    var rawBookingUrl = (posLinkIdx !== undefined) ? String(row[posLinkIdx] || '') : '';
+    var urlSource = 'Position Link';
+
+    // Fallback: if Position Link empty, try CL_CODES sheet Booking Schedule URL
+    if (!rawBookingUrl && clCode !== 'UNKNOWN') {
+      try {
+        var clDetails = getCLCodeDetails_(brand, clCode);
+        if (clDetails && clDetails.bookingUrl) {
+          rawBookingUrl = String(clDetails.bookingUrl);
+          urlSource = 'CL_CODES';
+          Logger.log('[REDIRECT_DEBUG] Position Link empty — fell back to CL_CODES for %s', clCode);
+        }
+      } catch (clErr) {
+        Logger.log('[REDIRECT_DEBUG] CL_CODES fallback error: %s', String(clErr));
+      }
+    }
+    
+    // --- NORMALIZE URL: Remove /u/{n}/ to get public booking link ---
+    // This prevents "Verify it's you" when redirecting candidates
+    var bookingUrl = normalizeAppointmentScheduleUrl_(rawBookingUrl);
+
+    // --- DETAILED LOGGING ---
+    Logger.log('[REDIRECT_DEBUG] traceId=%s clCode=%s brand=%s', traceId, clCode, brand);
+    Logger.log('[REDIRECT_DEBUG] URL source: %s', urlSource);
+    Logger.log('[REDIRECT_DEBUG] RAW URL: %s', rawBookingUrl || '(empty)');
+    Logger.log('[REDIRECT_DEBUG] NORMALIZED URL: %s', bookingUrl || '(empty)');
+    if (rawBookingUrl !== bookingUrl) {
+      Logger.log('[REDIRECT_DEBUG] URL was normalized (removed /u/{n}/ segment)');
+    }
+
+    // Validate booking URL — must not be empty
+    if (!bookingUrl) {
+      logEvent_(traceId, brand, '', 'REDIRECT_BLOCKED', { reason: 'Booking URL empty (Position Link + CL_CODES)', clCode: clCode });
+      return { ok: false, error: 'Booking link not configured. Please contact your recruiter.', code: 'NO_BOOKING_URL' };
+    }
+
+    // Block suspicious / misconfigured URLs
+    if (bookingUrl.indexOf('script.google.com') !== -1 || bookingUrl.indexOf('docs.google.com/forms') !== -1) {
+      logEvent_(traceId, brand, '', 'REDIRECT_BLOCKED', {
+        reason: 'Suspicious URL',
+        url: maskUrl_(bookingUrl),
+        clCode: clCode
+      });
+      return { ok: false, error: 'Booking link misconfigured. Contact support.', code: 'BAD_BOOKING_URL' };
+    }
+
+    // --- VALIDATE APPOINTMENT SCHEDULE URL ---
+    var urlValidation = isValidAppointmentScheduleUrl_(bookingUrl);
+    Logger.log('[REDIRECT_DEBUG] URL validation result: valid=%s reason=%s', urlValidation.valid, urlValidation.reason || 'OK');
+    
+    if (!urlValidation.valid) {
+      // Log the failure
+      logEvent_(traceId, brand, '', 'REDIRECT_BLOCKED_INVALID_SCHEDULE_URL', {
+        clCode: clCode,
+        reason: urlValidation.reason,
+        rawUrl: rawBookingUrl,
+        normalizedUrl: bookingUrl
+      });
+      
+      // Send admin notification email
+      try {
+        var adminEmail = Session.getEffectiveUser().getEmail();
+        MailApp.sendEmail({
+          to: adminEmail,
+          subject: '[URGENT] Invalid Booking URL Detected - ' + clCode,
+          body: 'A candidate attempted to access a booking link that is NOT a valid Appointment Schedule URL.\n\n' +
+                'Details:\n' +
+                '  Trace ID: ' + traceId + '\n' +
+                '  Brand: ' + brand + '\n' +
+                '  CL Code: ' + clCode + '\n' +
+                '  Text For Email: ' + textForEmail + '\n\n' +
+                'Raw URL (from Smartsheet/Sheet):\n  ' + rawBookingUrl + '\n\n' +
+                'Normalized URL:\n  ' + bookingUrl + '\n\n' +
+                'Validation Error:\n  ' + urlValidation.reason + '\n\n' +
+                'ACTION REQUIRED:\n' +
+                'Update the Position Link / Interview Link in Smartsheet (or CL_CODES sheet) to a valid PUBLIC Appointment Schedule URL:\n' +
+                '  https://calendar.google.com/calendar/appointments/schedules/{scheduleId}\n\n' +
+                'NOTE: Do NOT use /u/0/ in the URL - use the public format above.\n\n' +
+                'How to get the correct URL:\n' +
+                '1. Open Google Calendar as the schedule owner\n' +
+                '2. Click the Appointment Schedule\n' +
+                '3. Click Share > Copy booking page link\n' +
+                '4. Ensure "Anyone with the link" is selected in schedule settings\n' +
+                '5. Update the Smartsheet/CL_CODES with this URL'
+        });
+        Logger.log('[REDIRECT_DEBUG] Admin notification email sent to %s', adminEmail);
+      } catch (mailErr) {
+        Logger.log('[REDIRECT_DEBUG] Failed to send admin email: %s', String(mailErr));
+      }
+      
+      return { ok: false, error: 'Booking link is not a valid calendar schedule. Admin has been notified.', code: 'BAD_APPOINTMENT_URL' };
+    }
+
+    // --- FINAL REDIRECT URL LOG ---
+    var isPublicFormat = /\/calendar\/appointments\/schedules\//i.test(bookingUrl) && !/\/u\/\d+\//i.test(bookingUrl);
+    Logger.log('[REDIRECT_DEBUG] Final redirect URL: %s', bookingUrl);
+    Logger.log('[REDIRECT_DEBUG] URL is public format (no /u/{n}/): %s', isPublicFormat);
+    if (!isPublicFormat) {
+      Logger.log('[REDIRECT_WARN] URL may still trigger Google login - check calendar settings');
+    }
+
+    // === ATOMIC: Mark USED + set Used At BEFORE returning booking URL ===
+    sheet.getRange(sheetRow, idx['Status'] + 1).setValue('USED');
+    if (idx['Used At'] !== undefined) {
+      sheet.getRange(sheetRow, idx['Used At'] + 1).setValue(new Date());
+    }
+
+    logEvent_(traceId, brand, '', 'TOKEN_CONSUMED', {
+      token: token.substring(0, 8) + '...',
+      clCode: clCode,
+      bookingUrl: maskUrl_(bookingUrl)
+    });
+
+    return {
+      ok: true,
+      bookingUrl: bookingUrl,
+      brand: brand,
+      textForEmail: textForEmail
+    };
+
+  } finally {
+    lock.releaseLock();
+  }
 }

@@ -1,5 +1,11 @@
-# Prevent duplicate server-side definitions: we deploy the .js files only
-src/**/*.gs
-
-# Ignore staged merge snapshots
-staged-merge-*/**
+**/.git/**
+**/.gitignore
+**/.clasp.json
+**/node_modules/**
+**/package.json
+**/package-lock.json
+**/README.md
+**/TEST.md
+**/staged-merge-*/**
+**/temp_gs/**
+**/*.bak

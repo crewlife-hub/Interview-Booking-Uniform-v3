@@ -22,6 +22,17 @@ function serveOtpRequestPage_(params, traceId) {
   var email = validation.email;
   var textForEmail = validation.textForEmail;
   
+  // Check invite lock before proceeding
+  var lockHashes = [
+    hashEmail_(email),
+    Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, String(email).toLowerCase().trim())
+      .map(function(b) { return ('0' + (b & 0xFF).toString(16)).slice(-2); }).join('')
+  ];
+  if (isInviteLocked_(brand, lockHashes, textForEmail)) {
+    logEvent_(traceId, brand, email, 'OTP_PAGE_LOCKED', { textForEmail: textForEmail });
+    return serveErrorPage_('Invitation Used', 'This invitation link has already been used. Please contact Crew Life at Sea if you require a new booking.', traceId);
+  }
+  
   // Validate against Smartsheet
   var candidate = searchCandidateInSmartsheet_(brand, email, textForEmail);
   if (!candidate.ok) {
@@ -86,6 +97,17 @@ function handleOtpRequest_(params, traceId) {
   if (!validation.ok) {
     logEvent_(traceId, brand, email, 'OTP_REQUEST_REJECTED', { error: validation.error });
     return { ok: false, error: validation.error };
+  }
+  
+  // Check invite lock before proceeding
+  var lockHashes = [
+    hashEmail_(email),
+    Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, String(email).toLowerCase().trim())
+      .map(function(b) { return ('0' + (b & 0xFF).toString(16)).slice(-2); }).join('')
+  ];
+  if (isInviteLocked_(brand, lockHashes, textForEmail)) {
+    logEvent_(traceId, brand, email, 'OTP_REQUEST_LOCKED', { textForEmail: textForEmail });
+    return { ok: false, error: 'This invitation link has already been used. Please contact Crew Life at Sea if you require a new booking.' };
   }
   
   // Validate against Smartsheet
@@ -244,6 +266,80 @@ function startOtpByBrandCl_(params, traceId) {
 }
 
 /**
+ * Public entry point from BrandSelector.html via google.script.run.
+ * Validates candidate against Smartsheet (brand-locked), creates OTP, sends email.
+ * Does NOT call TokenService.issueToken_ — uses OtpService.createOtp_ only.
+ * @param {Object} params  { brand, email, textForEmail }
+ * @param {string} traceId
+ * @returns {{ ok:boolean, verifyUrl?:string, expiryMinutes?:number, error?:string }}
+ */
+function startOtpByTextForEmail(params, traceId) {
+  traceId          = traceId || generateTraceId_();
+  var brand        = String(params.brand        || '').toUpperCase().trim();
+  var email        = String(params.email        || '').toLowerCase().trim();
+  var textForEmail = String(params.textForEmail || '').trim();
+
+  if (!brand || !email || !textForEmail) {
+    return { ok: false, error: 'Missing required fields (brand, email, textForEmail).' };
+  }
+  if (!isValidBrand_(brand)) {
+    return { ok: false, error: 'Unknown brand: ' + brand };
+  }
+
+  // 1. Validate candidate against Smartsheet (brand-locked, ANY-sheet match)
+  var searchResult = searchCandidateInSmartsheet_(brand, email, textForEmail);
+  if (!searchResult.ok) {
+    return { ok: false, error: 'Could not verify candidate. Please try again later.' };
+  }
+  if (!searchResult.found || !searchResult.exactMatch) {
+    return { ok: false, error: 'Your email and selected position do not match our records.' };
+  }
+
+  // 2. Attach Interview Link to candidate so createOtp_ stores it as Position Link
+  var candidate = searchResult.candidate || {};
+  candidate['Position Link'] = searchResult.interviewLink || '';
+
+  // 3. Create OTP (single call — writes token row with Position Link)
+  var otpResult = createOtp_({
+    email:        email,
+    brand:        brand,
+    textForEmail: textForEmail,
+    traceId:      traceId,
+    candidate:    candidate
+  });
+  if (!otpResult.ok) {
+    return { ok: false, error: otpResult.error || 'OTP generation failed.' };
+  }
+
+  // 4. Send OTP email (exactly once)
+  var emailResult = sendOtpEmail_({
+    email:         email,
+    otp:           otpResult.otp,
+    brand:         brand,
+    textForEmail:  textForEmail,
+    token:         otpResult.token,
+    expiryMinutes: otpResult.expiryMinutes,
+    traceId:       traceId
+  });
+  if (!emailResult.ok) {
+    return { ok: false, error: emailResult.error || 'Failed to send OTP email.' };
+  }
+
+  logEvent_(traceId, brand, email, 'OTP_START_SUCCESS', {
+    matchedSheetId:   searchResult.matchedSheetId || '',
+    hasInterviewLink: !!(searchResult.interviewLink)
+  });
+
+  var verifyUrl = getWebAppUrl_() +
+    '?page=verify&brand=' + encodeURIComponent(brand) +
+    '&e='     + encodeURIComponent(email) +
+    '&t='     + encodeURIComponent(textForEmail) +
+    '&token=' + encodeURIComponent(otpResult.token);
+
+  return { ok: true, token: otpResult.token, verifyUrl: verifyUrl, expiryMinutes: otpResult.expiryMinutes };
+}
+
+/**
  * Handle OTP verification form submission (POST)
  * HARDCORE DIAGNOSTICS: logs every step, returns full trace in response
  * @param {Object} params - Form parameters
@@ -295,43 +391,52 @@ function handleOtpVerify_(params, traceId) {
     return { ok: false, error: result.error, diag: diag };
   }
   
-  // CL Resolution check
-  var clRes = result.clResolution;
-  if (!clRes || !clRes.ok) {
-    logStep('CL_RESOLUTION_FAILED', { clResolution: clRes });
-    return { ok: true, verified: true, error: clRes ? clRes.error : 'Could not resolve booking URL', textForEmail: result.textForEmail, diag: diag };
+  // Build secure access URL — never expose the actual booking URL to the client
+  var bookingUrl = (result.clResolution && result.clResolution.bookingUrl)
+    ? result.clResolution.bookingUrl
+    : null;
+
+  if (!bookingUrl) {
+    logStep('REDIRECT_FAIL', { reason: 'No booking URL in clResolution or Position Link' });
+    logEvent_(traceId, brand, email, 'REDIRECT_FAIL', { token: token ? token.substring(0,8)+'...' : '' });
+    return { ok: true, verified: true, error: 'Could not resolve booking URL. Please contact your recruiter.', textForEmail: result.textForEmail, diag: diag };
   }
-  
-  logStep('CL_RESOLUTION_OK', { bookingUrl: maskUrl_(clRes.bookingUrl), recruiterName: clRes.recruiterName, clCode: clRes.clCode });
-  
-  // Send booking confirmation email
+
+  // The access URL points to the confirm gate — use CANONICAL URL, never a calendar link
+  var accessUrl = getEmailCtaBaseUrl_() + '?page=access&token=' + encodeURIComponent(token);
+
+  logStep('ACCESS_URL_GENERATED', { accessUrl: maskUrl_(accessUrl) });
+  logEvent_(traceId, brand, email, 'ACCESS_URL_GENERATED', {
+    token: token ? token.substring(0,8)+'...' : ''
+  });
+
+  // Send booking confirmation email with secure access link (NOT the booking URL)
   var emailResult;
   try {
     emailResult = sendBookingConfirmEmail_({
-      email: email,
-      brand: brand,
+      candidateName: (candidate && candidate.candidate && candidate.candidate['Name']) ? candidate.candidate['Name'].split(' ')[0] : '',
+      email:        email,
+      brand:        brand,
       textForEmail: result.textForEmail || textForEmail,
-      bookingUrl: clRes.bookingUrl,
-      traceId: traceId
+      accessUrl:    accessUrl,
+      traceId:      traceId
     });
     logStep('SEND_BOOKING_EMAIL_RESULT', { ok: emailResult.ok, error: emailResult.error || null });
   } catch (e) {
-    logStep('SEND_BOOKING_EMAIL_EXCEPTION', { error: String(e), stack: e.stack });
+    logStep('SEND_BOOKING_EMAIL_EXCEPTION', { error: String(e) });
     emailResult = { ok: false, error: 'Email exception: ' + String(e) };
   }
-  
+
   logStep('COMPLETE', { emailSent: emailResult.ok });
-  
+
   return {
-    ok: true,
-    verified: true,
-    emailSent: emailResult.ok,
-    emailError: emailResult.error || null,
-    bookingUrl: clRes.bookingUrl,
-    recruiterName: clRes.recruiterName,
-    clCode: clRes.clCode,
+    ok:           true,
+    verified:     true,
+    emailSent:    emailResult.ok,
+    emailError:   emailResult.error || null,
+    accessUrl:    accessUrl,
     textForEmail: result.textForEmail,
-    diag: diag
+    diag:         diag
   };
 }
 
@@ -356,9 +461,9 @@ function serveBookingConfirmPage_(params, traceId) {
   var brand = String(params.brand || '').toUpperCase();
   var email = String(params.e || '').toLowerCase().trim();
   var textForEmail = String(params.t || '').trim();
-  var bookingUrl = params.url || '';
+  var token = String(params.token || '').trim();
   
-  if (!brand || !bookingUrl) {
+  if (!brand || !token) {
     return serveErrorPage_('Invalid Request', 'Missing booking information', traceId);
   }
   
@@ -369,9 +474,10 @@ function serveBookingConfirmPage_(params, traceId) {
   template.brand = brand;
   template.brandName = brandInfo ? brandInfo.name : brand;
   template.webAppUrl = getWebAppUrl_();
+  template.accessUrl = getWebAppUrl_() + '?page=access&token=' + encodeURIComponent(token);
   template.email = email;
   template.textForEmail = textForEmail;
-  template.bookingUrl = bookingUrl;
+  template.token = token;
   template.recruiterName = clResolution.ok ? clResolution.recruiterName : '';
   template.clCode = clResolution.ok ? clResolution.clCode : '';
   template.version = APP_VERSION;
