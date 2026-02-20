@@ -12,25 +12,6 @@
  * ===========================================================================
  */
 
-// ── Sideways performance constants ──────────────────────────────────────
-var SIDEWAYS_MAX_MS_PER_RUN    = 330000;   // 5 min 30 sec hard ceiling
-var SIDEWAYS_MAX_ROWS_TO_SCAN  = 10000;    // max rows to examine per sheet per run
-var SIDEWAYS_MAX_MATCHES       = 50;       // stop collecting after this many Sideways hits
-var SIDEWAYS_PROGRESS_INTERVAL = 200;      // log progress every N rows scanned
-
-/** Read the cursor index from ScriptProperties for a brand+sheet combo. */
-function getSidewaysCursor_(brand, sheetId) {
-  var key = 'SIDEWAYS_CURSOR_' + brand + '_' + sheetId;
-  var val = PropertiesService.getScriptProperties().getProperty(key);
-  return val ? Number(val) : 0;
-}
-
-/** Write the cursor index to ScriptProperties for a brand+sheet combo. */
-function setSidewaysCursor_(brand, sheetId, index) {
-  var key = 'SIDEWAYS_CURSOR_' + brand + '_' + sheetId;
-  PropertiesService.getScriptProperties().setProperty(key, String(index));
-}
-
 /**
  * Process rows across all brands (or single brand) where SEND == "Sideways".
  * @param {Object} opts - { brand: string|null, limit: number }
@@ -38,31 +19,18 @@ function setSidewaysCursor_(brand, sheetId, index) {
  */
 function processSidewaysInvites_(opts) {
   opts = opts || {};
-  var runStart = Date.now();
 
   var limit = (opts.limit === undefined || opts.limit === null || opts.limit === '')
-    ? SIDEWAYS_MAX_MATCHES
+    ? Number.MAX_SAFE_INTEGER
     : Number(opts.limit);
-  if (!isFinite(limit) || limit <= 0) limit = SIDEWAYS_MAX_MATCHES;
+  if (!isFinite(limit) || limit <= 0) limit = Number.MAX_SAFE_INTEGER;
 
   var brands = opts.brand ? [String(opts.brand).toUpperCase()] : getAllBrandCodes_();
 
   var traceId = generateTraceId_();
   logEvent_(traceId, '', '', 'SIDEWAYS_RUN_START', { mode: 'LIVE', brands: brands, limit: limit });
 
-  var results = {
-    traceId: traceId,
-    totalRows: 0,
-    sidewaysFound: 0,
-    emailsSent: 0,
-    updatesWritten: 0,
-    failures: 0,
-    processed: 0,
-    sent: 0,
-    updated: 0,
-    skipped: 0,
-    errors: []
-  };
+  var results = { traceId: traceId, processed: 0, sent: 0, updated: 0, skipped: 0, errors: [] };
 
   var cfg = getConfig_();
   var apiToken = cfg.SMARTSHEET_API_TOKEN;
@@ -82,39 +50,263 @@ function processSidewaysInvites_(opts) {
       logEvent_(traceId, brand, '', 'SIDEWAYS_BRAND_SHEETS', { sheetIds: sheetIds, sheetCount: sheetIds.length });
 
       for (var s = 0; s < sheetIds.length; s++) {
-        if (results.processed >= limit) break;
-        if (Date.now() - runStart > SIDEWAYS_MAX_MS_PER_RUN) break;
         var sheetId = sheetIds[s];
-        var remaining = limit - results.processed;
-        var sheetResult = processSidewaysForSheet_(sheetId, brand, {
-          apiToken: apiToken,
-          traceId: traceId,
-          limit: remaining,
-          runStart: runStart
-        });
 
-        if (!sheetResult.ok) {
-          results.failures += 1;
-          results.errors.push({ sheetId: sheetId, error: sheetResult.error || 'Sheet processing failed' });
+        // == SINGLE FETCH per sheet ======================================
+        var sheetData = fetchSmartsheet_(sheetId, apiToken);
+        if (!sheetData.ok) {
+          logEvent_(traceId, brand, '', 'SIDEWAYS_SHEET_FETCH_FAILED', { sheetId: sheetId, error: sheetData.error });
+          results.errors.push({ sheetId: sheetId, error: sheetData.error });
           continue;
         }
 
-        results.totalRows += (sheetResult.totalRows || 0);
-        results.sidewaysFound += (sheetResult.sidewaysFound || 0);
-        results.emailsSent += (sheetResult.emailsSent || 0);
-        results.updatesWritten += (sheetResult.updatesWritten || 0);
-        results.failures += (sheetResult.failures || 0);
+        var columns = sheetData.columns;
+        var rows = sheetData.rows || [];
+        var sheetName = String(sheetData.name || '');
+        Logger.log('[SIDEWAYS_SHEET] brand=%s sheetId=%s sheetName="%s" rows=%s', brand, sheetId, sheetName, rows.length);
 
-        results.processed += (sheetResult.processed || 0);
-        results.sent += (sheetResult.emailsSent || 0);
-        results.updated += (sheetResult.updatesWritten || 0);
-        results.skipped += (sheetResult.skipped || 0);
+        // == COLUMN MAP (cached from single fetch) =======================
+        var colTitleToId = {};
+        var colIdToTitle = {};
+        var colMetaById = {};
+        for (var i = 0; i < columns.length; i++) {
+          colTitleToId[columns[i].title] = columns[i].id;
+          colIdToTitle[String(columns[i].id)] = columns[i].title;
+          colMetaById[String(columns[i].id)] = columns[i];
+        }
 
-        if (sheetResult.errors && sheetResult.errors.length) {
-          for (var eidx = 0; eidx < sheetResult.errors.length; eidx++) {
-            results.errors.push(sheetResult.errors[eidx]);
+        // == COLUMN RESOLUTION ===========================================
+        var brandCfg = getBrand_(brand) || {};
+
+        function resolveCol_(configIdKey, titleCandidates) {
+          var cfgId = brandCfg[configIdKey] ? String(brandCfg[configIdKey]) : null;
+          if (cfgId && colIdToTitle[cfgId]) {
+            Logger.log('[RESOLVE_COL] %s -> id=%s title="%s"', configIdKey, cfgId, colIdToTitle[cfgId]);
+            return { id: Number(cfgId), title: colIdToTitle[cfgId] };
+          }
+          for (var ti = 0; ti < titleCandidates.length; ti++) {
+            if (colTitleToId[titleCandidates[ti]]) {
+              Logger.log('[RESOLVE_COL] %s -> title match "%s"', configIdKey, titleCandidates[ti]);
+              return { id: colTitleToId[titleCandidates[ti]], title: titleCandidates[ti] };
+            }
+          }
+          return null;
+        }
+
+        // SEND column
+        var sendRes = resolveCol_('sendColumnId', ['SEND Interview Invite', 'Send Interview Invite', 'SEND Interview']);
+        if (!sendRes) {
+          var best = null, bestScore = -1;
+          for (var sc = 0; sc < columns.length; sc++) {
+            var t = String(columns[sc].title || '');
+            var stripped = t.toLowerCase().replace(/[^a-z0-9\s]/g, '').replace(/\s+/g, ' ').trim();
+            if (stripped.indexOf('send') === -1) continue;
+            var score = 1;
+            if (stripped.indexOf('invite') !== -1) score += 3;
+            if (stripped.indexOf('interview') !== -1) score += 5;
+            if (stripped.indexOf('1') !== -1) score += 1;
+            Logger.log('  SEND_FUZZY: "%s" stripped="%s" score=%s', t, stripped, score);
+            if (score > bestScore) { bestScore = score; best = columns[sc]; }
+          }
+          if (best) sendRes = { id: best.id, title: best.title };
+        }
+
+        var sendCol = sendRes ? sendRes.id : null;
+        if (!sendCol) {
+          var sampleTitles = [];
+          for (var ct = 0; ct < Math.min(columns.length, 30); ct++) sampleTitles.push(columns[ct].title);
+          logEvent_(traceId, brand, '', 'SIDEWAYS_NO_SEND_COLUMN', { sheetId: sheetId, colCount: columns.length, sample: sampleTitles.slice(0, 10) });
+          continue;
+        }
+        Logger.log('[SIDEWAYS] Using SEND column: id=%s title="%s"', sendCol, sendRes.title);
+
+        // Email column
+        var emailRes = resolveCol_('emailColumnId', [brandCfg.emailColumn || 'Email', 'Email']);
+        var emailColName = emailRes ? emailRes.title : (brandCfg.emailColumn || 'Email');
+
+        // Text For Email column
+        var textRes = resolveCol_('textForEmailColumnId', [brandCfg.textForEmailColumn || 'Text For Email', 'Text For Email']);
+        var textForEmailCol = textRes ? textRes.title : (brandCfg.textForEmailColumn || 'Text For Email');
+
+        // Interview Link column
+        var linkRes = resolveCol_('interviewLinkColumnId', ['Interview 1 Link', 'Interview 1 link', 'Interview Link', 'InterviewLink']);
+        var interviewLinkCol = linkRes ? linkRes.title : null;
+
+        // Date Sent column
+        var dateRes = resolveCol_('dateSentColumnId', ['Date Sent', 'DATE SENT', 'DATE_SENT']);
+        if (!dateRes) {
+          for (var di = 0; di < columns.length; di++) {
+            var dt = String(columns[di].title || '');
+            if (dt.toLowerCase().replace(/[^a-z0-9]/g, '') === 'datesent') {
+              dateRes = { id: columns[di].id, title: columns[di].title };
+              break;
+            }
           }
         }
+        var dateSentColId = dateRes ? dateRes.id : null;
+
+        // Position Link column
+        var posRes = resolveCol_('positionLinkColumnId', ['Position Link', 'PositionLink']);
+        var positionLinkCol = posRes ? posRes.title : 'Position Link';
+
+        // Full Name column
+        var nameRes = resolveCol_('fullNameColumnId', ['Full Name', 'Name', 'First Name']);
+
+        // Interviewer column
+        var interviewerCol = colTitleToId['Interviewer'] ? 'Interviewer' : 'Interviewer';
+
+        // == ROW PROCESSING ==============================================
+        var pendingUpdates = []; // collect for batch update
+        var found = 0;
+
+        for (var r = 0; r < rows.length && results.processed < limit; r++) {
+          var row = rows[r];
+          var cells = row.cells || [];
+          var rowMap = { rowId: row.id };
+          var sendVal = '';
+          for (var c = 0; c < cells.length; c++) {
+            var cell = cells[c];
+            var title = colIdToTitle[String(cell.columnId)] || '';
+            var value = getSmartsheetCellString_(cell);
+            rowMap[title] = value;
+            if (cell.columnId === sendCol) sendVal = String(value || '').trim();
+          }
+
+          // -- IDEMPOTENCY: skip rows already sent ----------------------
+          var sendLower = sendVal.toLowerCase();
+          if (sendLower.indexOf('sent') !== -1 && sendLower !== 'sideways') {
+            Logger.log('[SIDEWAYS_SKIP_ALREADY_SENT] rowId=%s brand=%s sendVal=%s', row.id, brand, sendVal);
+            logEvent_(traceId, brand, '', 'SIDEWAYS_SKIP_ALREADY_SENT', { rowId: row.id, sendVal: sendVal });
+            results.skipped++;
+            continue; // already processed (e.g. "🔔 Sent")
+          }
+          if (sendLower !== 'sideways') continue;
+
+          results.processed++;
+          found++;
+
+          var candidateEmail = rowMap[emailColName] || '';
+          var textForEmail = rowMap[textForEmailCol] || '';
+          var interviewer = rowMap[interviewerCol] || '';
+          var candidateName = rowMap['Full Name'] || rowMap['Name'] || rowMap['First Name'] || '';
+          var position = rowMap['Position Applied'] || rowMap['Position'] || rowMap['Job Title'] || textForEmail;
+
+          Logger.log('[SIDEWAYS_ROW_FOUND] rowId=%s brand=%s email=%s', row.id, brand, String(candidateEmail || ''));
+
+          var stepDetails = {
+            sheetId: sheetId, sheetName: sheetName, rowId: row.id,
+            email: candidateEmail, brand: brand, textForEmail: textForEmail
+          };
+          logEvent_(traceId, brand, candidateEmail, 'SIDEWAYS_ROW_FOUND', stepDetails);
+
+          // -- FIELD VALIDATION -----------------------------------------
+          var candidateEmailNorm = String(candidateEmail || '').trim().toLowerCase();
+          if (!candidateEmailNorm || !isValidEmail_(candidateEmailNorm) || isPlaceholderEmail_(candidateEmailNorm) || isForbiddenRecipientEmail_(candidateEmailNorm)) {
+            Logger.log('[SIDEWAYS_SKIP_INVALID_EMAIL] rowId=%s brand=%s email=%s', row.id, brand, String(candidateEmail || ''));
+            logEvent_(traceId, brand, String(candidateEmail || ''), 'SIDEWAYS_ROW_SKIPPED_INVALID_EMAIL', {
+              rowId: row.id,
+              email: String(candidateEmail || ''),
+              forbidden: isForbiddenRecipientEmail_(candidateEmailNorm),
+              placeholder: isPlaceholderEmail_(candidateEmailNorm)
+            });
+            results.skipped++;
+            continue;
+          }
+          if (!textForEmail) {
+            logEvent_(traceId, brand, candidateEmail, 'SIDEWAYS_ROW_SKIPPED_NO_TEXT', { rowId: row.id });
+            results.skipped++;
+            continue;
+          }
+
+          // -- LIVE: create OTP + send email ----------------------------
+          var otpCreated = createOtp_({
+            email: candidateEmailNorm,
+            brand: brand,
+            textForEmail: textForEmail,
+            traceId: traceId
+          });
+          if (!otpCreated.ok || !otpCreated.token) {
+            logEvent_(traceId, brand, candidateEmailNorm, 'SIDEWAYS_TOKEN_CREATE_FAILED', { rowId: row.id, error: otpCreated.error || 'unknown' });
+            results.errors.push({ rowId: row.id, error: 'Token creation failed: ' + (otpCreated.error || 'unknown') });
+            results.skipped++;
+            continue;
+          }
+
+          Logger.log('[OTP_CREATED] rowId=%s brand=%s email=%s', row.id, brand, candidateEmailNorm);
+          logEvent_(traceId, brand, candidateEmailNorm, 'OTP_CREATED', { rowId: row.id });
+
+          var emailResult = sendBookingConfirmEmail_({
+            email: candidateEmailNorm,
+            brand: brand,
+            textForEmail: textForEmail,
+            position: position,
+            token: otpCreated.token,
+            candidateName: candidateName,
+            traceId: traceId
+          });
+
+          Logger.log('[SIDEWAYS_EMAIL_SENT] rowId=%s email=%s brand=%s ok=%s error=%s', row.id, candidateEmailNorm, brand, emailResult.ok, emailResult.error || '');
+          logEvent_(traceId, brand, candidateEmailNorm, 'SIDEWAYS_EMAIL_SENT', {
+            rowId: row.id, to: candidateEmailNorm, ok: emailResult.ok, error: emailResult.error || null
+          });
+
+          if (!emailResult.ok) {
+            results.errors.push({ rowId: row.id, error: 'Email send failed: ' + emailResult.error });
+            results.skipped++;
+            continue;
+          }
+
+          results.sent++;
+
+          // -- QUEUE ROW UPDATE for batch --------------------------------
+          var cellsToUpdate = [{ columnId: Number(sendCol), value: '🔔 Sent' }];
+          if (dateSentColId) {
+            cellsToUpdate.push({ columnId: Number(dateSentColId), value: new Date().toISOString() });
+          }
+          pendingUpdates.push({ id: Number(row.id), cells: cellsToUpdate });
+        }
+
+        // == BATCH UPDATE SMARTSHEET =====================================
+        if (pendingUpdates.length > 0) {
+          Logger.log('[SIDEWAYS_BATCH] Updating %s rows in sheet %s', pendingUpdates.length, sheetId);
+          var batchResult = batchUpdateSmartsheetRows_(sheetId, pendingUpdates, apiToken, colMetaById);
+          Logger.log('[SIDEWAYS_SMARTSHEET_UPDATE_OCCURRED] sheetId=%s ok=%s updated=%s', sheetId, batchResult.ok, batchResult.updated || 0);
+          logEvent_(traceId, brand, '', 'SIDEWAYS_BATCH_UPDATE', {
+            sheetId: sheetId, requested: pendingUpdates.length,
+            ok: batchResult.ok, updated: batchResult.updated || 0,
+            error: batchResult.error || null
+          });
+          if (batchResult.ok) {
+            results.updated += (batchResult.updated || pendingUpdates.length);
+            Logger.log('[SIDEWAYS_BATCH] %s rows updated successfully', batchResult.updated || pendingUpdates.length);
+            var expectedUpdated = pendingUpdates.length;
+            var actualUpdated = batchResult.updated || expectedUpdated;
+            if (actualUpdated === expectedUpdated) {
+              for (var u = 0; u < pendingUpdates.length; u++) {
+                Logger.log('[SIDEWAYS_UPDATE_OK] sheetId=%s rowId=%s', sheetId, pendingUpdates[u].id);
+              }
+            } else {
+              Logger.log('[SIDEWAYS_UPDATE_OK] sheetId=%s updated=%s', sheetId, actualUpdated);
+            }
+          } else {
+            // Batch failed — fall back to per-row updates
+            Logger.log('[SIDEWAYS_BATCH] Batch failed: %s — falling back to per-row', batchResult.error);
+            for (var pu = 0; pu < pendingUpdates.length; pu++) {
+              var rowUpdate = pendingUpdates[pu];
+              var perRowResult = patchRowCellsByColumnId_(sheetId, rowUpdate.id, rowUpdate.cells, apiToken, colMetaById);
+              if (perRowResult.ok) {
+                results.updated++;
+                Logger.log('[SIDEWAYS_UPDATE_OK] sheetId=%s rowId=%s', sheetId, rowUpdate.id);
+              } else {
+                results.errors.push({ rowId: rowUpdate.id, error: 'Row update failed: ' + perRowResult.error });
+              }
+            }
+          }
+        }
+
+        logEvent_(traceId, brand, '', 'SIDEWAYS_SHEET_SUMMARY', {
+          sheetId: sheetId, sheetName: sheetName, found: found, updated: pendingUpdates.length
+        });
       }
     }
   } catch (e) {
@@ -122,244 +314,9 @@ function processSidewaysInvites_(opts) {
     return { ok: false, error: String(e) };
   }
 
-  Logger.log('[SIDEWAYS_SUMMARY] totalRows=%s sidewaysFound=%s emailsSent=%s updatesWritten=%s failures=%s processed=%s sent=%s updated=%s skipped=%s errors=%s',
-    results.totalRows, results.sidewaysFound, results.emailsSent, results.updatesWritten, results.failures,
-    results.processed, results.sent, results.updated, results.skipped, (results.errors || []).length);
+  Logger.log('[SIDEWAYS_SUMMARY] processed=%s sent=%s updated=%s skipped=%s errors=%s', results.processed, results.sent, results.updated, results.skipped, (results.errors || []).length);
   logEvent_(traceId, '', '', 'SIDEWAYS_RUN_COMPLETE', results);
   return { ok: true, summary: results };
-}
-
-function processSidewaysForSheet_(sheetId, brand, opts) {
-  opts = opts || {};
-
-  var traceId = opts.traceId || generateTraceId_();
-  var apiToken = opts.apiToken;
-  if (!apiToken) {
-    var cfg = getConfig_();
-    apiToken = cfg.SMARTSHEET_API_TOKEN;
-  }
-  if (!apiToken) {
-    return { ok: false, error: 'SMARTSHEET API token not configured' };
-  }
-
-  var limit = (opts.limit === undefined || opts.limit === null || opts.limit === '')
-    ? Number.MAX_SAFE_INTEGER
-    : Number(opts.limit);
-  if (!isFinite(limit) || limit <= 0) limit = Number.MAX_SAFE_INTEGER;
-
-  var summary = {
-    ok: true,
-    sheetId: sheetId,
-    brand: brand,
-    totalRows: 0,
-    sidewaysFound: 0,
-    emailsSent: 0,
-    updatesWritten: 0,
-    failures: 0,
-    processed: 0,
-    skipped: 0,
-    errors: []
-  };
-
-  var sheetData = fetchSmartsheet_(sheetId, apiToken);
-  if (!sheetData.ok) {
-    logEvent_(traceId, brand, '', 'SIDEWAYS_SHEET_FETCH_FAILED', { sheetId: sheetId, error: sheetData.error });
-    return { ok: false, error: sheetData.error || 'Sheet fetch failed' };
-  }
-
-  var columns = sheetData.columns || [];
-  var rows = sheetData.rows || [];
-  var sheetName = String(sheetData.name || '');
-  summary.totalRows = rows.length;
-
-  Logger.log('[SIDEWAYS_SHEET] brand=%s sheetId=%s sheetName="%s" totalRows=%s', brand, sheetId, sheetName, rows.length);
-
-  var colTitleToId = {};
-  var colIdToTitle = {};
-  var colMetaById = {};
-  for (var i = 0; i < columns.length; i++) {
-    colTitleToId[columns[i].title] = columns[i].id;
-    colIdToTitle[String(columns[i].id)] = columns[i].title;
-    colMetaById[String(columns[i].id)] = columns[i];
-  }
-
-  var brandCfg = getBrand_(brand) || {};
-
-  function resolveCol_(configIdKey, titleCandidates) {
-    var cfgId = brandCfg[configIdKey] ? String(brandCfg[configIdKey]) : null;
-    if (cfgId && colIdToTitle[cfgId]) return { id: Number(cfgId), title: colIdToTitle[cfgId] };
-    for (var ti = 0; ti < titleCandidates.length; ti++) {
-      if (colTitleToId[titleCandidates[ti]]) return { id: colTitleToId[titleCandidates[ti]], title: titleCandidates[ti] };
-    }
-    return null;
-  }
-
-  var sendRes = resolveCol_('sendColumnId', [
-    'SEND 🔔1️⃣ Interview Invite',
-    'SEND Interview Invite',
-    'Send Interview Invite',
-    'SEND Interview'
-  ]);
-  if (!sendRes) {
-    var best = null;
-    var bestScore = -1;
-    for (var sc = 0; sc < columns.length; sc++) {
-      var t = String(columns[sc].title || '');
-      var stripped = t.toLowerCase().replace(/[^a-z0-9\s]/g, '').replace(/\s+/g, ' ').trim();
-      if (stripped.indexOf('send') === -1) continue;
-      var score = 1;
-      if (stripped.indexOf('invite') !== -1) score += 3;
-      if (stripped.indexOf('interview') !== -1) score += 5;
-      if (stripped.indexOf('1') !== -1) score += 1;
-      if (score > bestScore) {
-        bestScore = score;
-        best = columns[sc];
-      }
-    }
-    if (best) sendRes = { id: best.id, title: best.title };
-  }
-
-  var sendCol = sendRes ? sendRes.id : null;
-  if (!sendCol) {
-    logEvent_(traceId, brand, '', 'SIDEWAYS_NO_SEND_COLUMN', { sheetId: sheetId, colCount: columns.length });
-    return { ok: false, error: 'SEND column not found' };
-  }
-
-  var emailRes = resolveCol_('emailColumnId', [brandCfg.emailColumn || 'Email', 'Email']);
-  var emailColName = emailRes ? emailRes.title : (brandCfg.emailColumn || 'Email');
-
-  var textRes = resolveCol_('textForEmailColumnId', [brandCfg.textForEmailColumn || 'Text For Email', 'Text For Email']);
-  var textForEmailCol = textRes ? textRes.title : (brandCfg.textForEmailColumn || 'Text For Email');
-
-  var dateRes = resolveCol_('dateSentColumnId', ['Date Sent', 'DATE SENT', 'DATE_SENT']);
-  if (!dateRes) {
-    for (var di = 0; di < columns.length; di++) {
-      var dt = String(columns[di].title || '');
-      if (dt.toLowerCase().replace(/[^a-z0-9]/g, '') === 'datesent') {
-        dateRes = { id: columns[di].id, title: columns[di].title };
-        break;
-      }
-    }
-  }
-  var dateSentColId = dateRes ? dateRes.id : null;
-
-  var sidewaysRows = [];
-  for (var r = 0; r < rows.length; r++) {
-    var row = rows[r];
-    var cells = row.cells || [];
-    var rowMap = { rowId: row.id };
-    var sendVal = '';
-
-    for (var c = 0; c < cells.length; c++) {
-      var cell = cells[c];
-      var title = colIdToTitle[String(cell.columnId)] || '';
-      var value = getSmartsheetCellString_(cell);
-      rowMap[title] = value;
-      if (Number(cell.columnId) === Number(sendCol)) sendVal = String(value || '').trim();
-    }
-
-    if (sendVal === 'Sideways') {
-      sidewaysRows.push({ row: row, rowMap: rowMap });
-    }
-  }
-
-  summary.sidewaysFound = sidewaysRows.length;
-  Logger.log('[SIDEWAYS_COUNTS] sheetId=%s brand=%s totalRows=%s sidewaysFound=%s', sheetId, brand, summary.totalRows, summary.sidewaysFound);
-
-  var pendingUpdates = [];
-  for (var sr = 0; sr < sidewaysRows.length && summary.processed < limit; sr++) {
-    var item = sidewaysRows[sr];
-    var rowObj = item.row;
-    var rowMapObj = item.rowMap;
-    summary.processed++;
-
-    var candidateEmail = rowMapObj[emailColName] || '';
-    var textForEmail = rowMapObj[textForEmailCol] || '';
-    var candidateName = rowMapObj['Full Name'] || rowMapObj['Name'] || rowMapObj['First Name'] || '';
-    var position = rowMapObj['Position Applied'] || rowMapObj['Position'] || rowMapObj['Job Title'] || textForEmail;
-
-    var candidateEmailNorm = String(candidateEmail || '').trim().toLowerCase();
-    if (!candidateEmailNorm || !isValidEmail_(candidateEmailNorm) || isPlaceholderEmail_(candidateEmailNorm) || isForbiddenRecipientEmail_(candidateEmailNorm)) {
-      summary.skipped++;
-      summary.failures++;
-      summary.errors.push({ rowId: rowObj.id, error: 'Invalid email' });
-      continue;
-    }
-    if (!textForEmail) {
-      summary.skipped++;
-      summary.failures++;
-      summary.errors.push({ rowId: rowObj.id, error: 'Missing Text For Email' });
-      continue;
-    }
-
-    var otpCreated = createOtp_({
-      email: candidateEmailNorm,
-      brand: brand,
-      textForEmail: textForEmail,
-      traceId: traceId
-    });
-    if (!otpCreated.ok || !otpCreated.token) {
-      summary.skipped++;
-      summary.failures++;
-      summary.errors.push({ rowId: rowObj.id, error: 'Token creation failed: ' + (otpCreated.error || 'unknown') });
-      continue;
-    }
-
-    var emailResult = sendBookingConfirmEmail_({
-      email: candidateEmailNorm,
-      brand: brand,
-      textForEmail: textForEmail,
-      position: position,
-      token: otpCreated.token,
-      candidateName: candidateName,
-      traceId: traceId
-    });
-
-    if (!emailResult.ok) {
-      summary.skipped++;
-      summary.failures++;
-      summary.errors.push({ rowId: rowObj.id, error: 'Email send failed: ' + (emailResult.error || 'unknown') });
-      continue;
-    }
-
-    summary.emailsSent++;
-
-    var cellsToUpdate = [{ columnId: Number(sendCol), value: '🔔Sent' }];
-    if (dateSentColId) {
-      cellsToUpdate.push({ columnId: Number(dateSentColId), value: new Date().toISOString() });
-    }
-    pendingUpdates.push({ id: Number(rowObj.id), cells: cellsToUpdate });
-  }
-
-  if (pendingUpdates.length > 0) {
-    var batchResult = batchUpdateSmartsheetRows_(sheetId, pendingUpdates, apiToken, colMetaById);
-    summary.updatesWritten += (batchResult.updated || 0);
-    if (!batchResult.ok) {
-      summary.failures += (batchResult.failedRowIds && batchResult.failedRowIds.length) ? batchResult.failedRowIds.length : 1;
-      if (batchResult.failedRowIds && batchResult.failedRowIds.length) {
-        for (var fr = 0; fr < batchResult.failedRowIds.length; fr++) {
-          summary.errors.push({ rowId: batchResult.failedRowIds[fr], error: 'Batch update failed' });
-        }
-      } else {
-        summary.errors.push({ sheetId: sheetId, error: batchResult.error || 'Batch update failed' });
-      }
-    }
-  }
-
-  Logger.log('[SIDEWAYS_SHEET_SUMMARY] brand=%s sheetId=%s totalRows=%s sidewaysFound=%s emailsSent=%s updatesWritten=%s failures=%s',
-    brand, sheetId, summary.totalRows, summary.sidewaysFound, summary.emailsSent, summary.updatesWritten, summary.failures);
-
-  logEvent_(traceId, brand, '', 'SIDEWAYS_SHEET_SUMMARY', {
-    sheetId: sheetId,
-    sheetName: sheetName,
-    totalRows: summary.totalRows,
-    sidewaysFound: summary.sidewaysFound,
-    emailsSent: summary.emailsSent,
-    updatesWritten: summary.updatesWritten,
-    failures: summary.failures
-  });
-
-  return summary;
 }
 
 
@@ -393,7 +350,7 @@ function getSmartsheetCellString_(cell) {
  * Conservative limit to avoid timeouts/quota spikes.
  */
 function processSidewaysInvitesScheduled_() {
-  return processSidewaysInvites_({ limit: SIDEWAYS_MAX_MATCHES });
+  return processSidewaysInvites_({ limit: 200 });
 }
 
 
@@ -448,16 +405,14 @@ function batchUpdateSmartsheetRows_(sheetId, rowUpdates, apiToken, colMetaById) 
       }
     }
 
-    if (cleaned.length === 0) return { ok: false, error: 'No writable cells after formula filter', updated: 0, failedRowIds: [] };
+    if (cleaned.length === 0) return { ok: false, error: 'No writable cells after formula filter' };
 
     var totalUpdated = 0;
     var BATCH_SIZE = 200;
     var url = SMARTSHEET_API_BASE + '/sheets/' + sheetId + '/rows';
-    var failedRowIds = [];
 
     for (var start = 0; start < cleaned.length; start += BATCH_SIZE) {
       var chunk = cleaned.slice(start, start + BATCH_SIZE);
-
       var options = {
         method: 'put',
         contentType: 'application/json',
@@ -465,36 +420,20 @@ function batchUpdateSmartsheetRows_(sheetId, rowUpdates, apiToken, colMetaById) 
         headers: { 'Authorization': 'Bearer ' + apiToken },
         muteHttpExceptions: true
       };
-
       var resp = UrlFetchApp.fetch(url, options);
       var code = resp.getResponseCode();
       if (code >= 200 && code < 300) {
         totalUpdated += chunk.length;
-        continue;
+      } else {
+        var text = resp.getContentText();
+        Logger.log('[BATCH_UPDATE] Failed chunk at offset %s: HTTP %s - %s', start, code, text.substring(0, 500));
+        return { ok: false, error: 'HTTP ' + code + ' - ' + text.substring(0, 500), updated: totalUpdated };
       }
-
-      Utilities.sleep(300);
-      var retryResp = UrlFetchApp.fetch(url, options);
-      var retryCode = retryResp.getResponseCode();
-      if (retryCode >= 200 && retryCode < 300) {
-        totalUpdated += chunk.length;
-        continue;
-      }
-
-      for (var k = 0; k < chunk.length; k++) {
-        failedRowIds.push(chunk[k].id);
-      }
-      Logger.log('[BATCH_UPDATE] Failed chunk at offset %s: HTTP %s / retry HTTP %s', start, code, retryCode);
     }
 
-    return {
-      ok: failedRowIds.length === 0,
-      updated: totalUpdated,
-      failedRowIds: failedRowIds,
-      error: failedRowIds.length ? 'One or more chunks failed' : ''
-    };
+    return { ok: true, updated: totalUpdated };
   } catch (e) {
-    return { ok: false, error: String(e), updated: 0, failedRowIds: [] };
+    return { ok: false, error: String(e) };
   }
 }
 

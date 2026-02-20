@@ -15,7 +15,7 @@ var CONFIG_TABS = {
   },
   TOKENS: {
     name: 'TOKENS',
-    headers: ['Token', 'Email', 'Email Hash', 'Text For Email', 'Brand', 'CL Code', 'Status', 'Expiry', 'Created At', 'Used At', 'Issued By', 'Trace ID', 'OTP', 'Attempts', 'Position Link', 'Locked']
+    headers: ['Token', 'Email', 'Email Hash', 'Text For Email', 'Brand', 'CL Code', 'Status', 'Expiry', 'Created At', 'Used At', 'Issued By', 'Trace ID', 'OTP', 'Attempts']
   },
   LOGS: {
     name: 'LOGS',

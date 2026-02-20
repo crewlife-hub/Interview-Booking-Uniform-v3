@@ -22,17 +22,6 @@ function serveOtpRequestPage_(params, traceId) {
   var email = validation.email;
   var textForEmail = validation.textForEmail;
   
-  // Check invite lock before proceeding
-  var lockHashes = [
-    hashEmail_(email),
-    Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, String(email).toLowerCase().trim())
-      .map(function(b) { return ('0' + (b & 0xFF).toString(16)).slice(-2); }).join('')
-  ];
-  if (isInviteLocked_(brand, lockHashes, textForEmail)) {
-    logEvent_(traceId, brand, email, 'OTP_PAGE_LOCKED', { textForEmail: textForEmail });
-    return serveErrorPage_('Invitation Used', 'This invitation link has already been used. Please contact Crew Life at Sea if you require a new booking.', traceId);
-  }
-  
   // Validate against Smartsheet
   var candidate = searchCandidateInSmartsheet_(brand, email, textForEmail);
   if (!candidate.ok) {
@@ -97,17 +86,6 @@ function handleOtpRequest_(params, traceId) {
   if (!validation.ok) {
     logEvent_(traceId, brand, email, 'OTP_REQUEST_REJECTED', { error: validation.error });
     return { ok: false, error: validation.error };
-  }
-  
-  // Check invite lock before proceeding
-  var lockHashes = [
-    hashEmail_(email),
-    Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, String(email).toLowerCase().trim())
-      .map(function(b) { return ('0' + (b & 0xFF).toString(16)).slice(-2); }).join('')
-  ];
-  if (isInviteLocked_(brand, lockHashes, textForEmail)) {
-    logEvent_(traceId, brand, email, 'OTP_REQUEST_LOCKED', { textForEmail: textForEmail });
-    return { ok: false, error: 'This invitation link has already been used. Please contact Crew Life at Sea if you require a new booking.' };
   }
   
   // Validate against Smartsheet
