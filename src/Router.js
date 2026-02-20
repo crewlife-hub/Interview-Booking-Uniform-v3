@@ -333,7 +333,7 @@ function handleSecureAccessConfirm_(params, traceId) {
 
   // Serve the secure redirect page (booking URL only in JS, never visible)
   var template = HtmlService.createTemplateFromFile('SecureRedirect');
-  template.bookingUrl = result.bookingUrl;
+  template.deptUrl = result.bookingUrl;
   template.brand = result.brand;
   template.textForEmail = result.textForEmail;
   template.version = APP_VERSION;

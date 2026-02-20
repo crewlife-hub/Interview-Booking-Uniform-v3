@@ -127,7 +127,7 @@
         </p>
         
         <div style="text-align: center; margin: 20px 0;">
-          <a href="#" id="bookingLink" class="btn btn-success" style="padding: 15px 40px; font-size: 18px; text-decoration: none;">
+          <a href="#" id="bookingLink" class="btn btn-success" target="_blank" rel="noopener noreferrer" style="padding: 15px 40px; font-size: 18px; text-decoration: none;">
             📅 Access Interview Booking
           </a>
         </div>
@@ -482,7 +482,14 @@
       }
       
       // Point to the secure access URL (web app confirm gate), never the calendar URL
-      document.getElementById('bookingLink').href = result.accessUrl;
+      var bookingLink = document.getElementById('bookingLink');
+      bookingLink.href = result.accessUrl;
+      bookingLink.target = '_blank';
+      bookingLink.rel = 'noopener noreferrer';
+      bookingLink.onclick = function(evt) {
+        evt.preventDefault();
+        window.open(result.accessUrl, '_blank', 'noopener,noreferrer');
+      };
     }
     
     function showClError(msg) {

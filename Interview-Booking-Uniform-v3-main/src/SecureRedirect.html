@@ -54,8 +54,13 @@
   <script>
     (function() {
       try {
-        // Use replace() so the back-button cannot return here
-        window.location.replace('<?= bookingUrl ?>');
+        var deptUrl = <?!= JSON.stringify(deptUrl) ?>;
+        if (!deptUrl) throw new Error('Missing booking URL');
+        try {
+          window.top.location.href = deptUrl;
+        } catch (topErr) {
+          window.location.href = deptUrl;
+        }
       } catch (e) {
         document.getElementById('redirectBox').innerHTML =
           '<h3 style="color:#dc3545;">Redirect Error</h3>' +
