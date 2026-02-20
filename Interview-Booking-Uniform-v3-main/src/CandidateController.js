@@ -122,7 +122,7 @@ function serveRedirectPage_(url, brand) {
   html += '<p>You will be redirected automatically.</p>';
   html += '<p>If you are not redirected, <a href="' + escapeHtml_(url) + '">click here</a>.</p>';
   html += '</div>';
-  html += '<script>setTimeout(function() { window.location.href = "' + url.replace(/"/g, '\\"') + '"; }, 500);</script>';
+  html += '<script>setTimeout(function() { var u = ' + JSON.stringify(url) + '; try { window.top.location.href = u; } catch(e) { window.location.href = u; } }, 500);</script>';
   html += '</body></html>';
   
   return HtmlService.createHtmlOutput(html)
