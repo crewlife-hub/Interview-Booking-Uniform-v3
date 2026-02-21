@@ -5,7 +5,7 @@
  */
 
 var APP_VERSION = '1.0.0';
-var BUILD_ID = '20260221-ui-patch-01';
+var BUILD_ID = 'ui-2026-02-21-02';
 var CONFIG_SHEET_ID = '1qM3ZEdBsvbEofDH8DayRWcRa4bUcrKQIv8kzKSYZ1AM';
 
 /**

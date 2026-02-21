@@ -280,14 +280,23 @@ function serveDiagPage_(brand, traceId) {
   var results = [];
   var ok = true;
   
-  // 0. Build info and canonical URL
+  // 0. Build info, template map, and canonical URL
   try {
     var buildId = typeof BUILD_ID !== 'undefined' ? BUILD_ID : 'unknown';
     var canonicalUrl = typeof CANONICAL_EXEC_URL !== 'undefined' ? CANONICAL_EXEC_URL : 'not set';
     results.push({ test: 'Build ID', ok: true, detail: buildId });
+    results.push({ test: 'Token-page template', ok: true, detail: 'BrandSelector (serveBrandSelector_)' });
     results.push({ test: 'CANONICAL_EXEC_URL', ok: canonicalUrl.indexOf('/exec') !== -1, detail: canonicalUrl });
   } catch (e) {
     results.push({ test: 'Build Info', ok: false, detail: String(e) });
+  }
+
+  // 0a. ScriptApp.getService().getUrl()
+  try {
+    var scriptUrl = ScriptApp.getService().getUrl();
+    results.push({ test: 'ScriptApp.getService().getUrl()', ok: true, detail: scriptUrl });
+  } catch (e) {
+    results.push({ test: 'ScriptApp.getService().getUrl()', ok: false, detail: String(e) });
   }
   
   // 0b. Script Property WEB_APP_EXEC_URL
