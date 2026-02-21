@@ -51,7 +51,7 @@ function setupWebApp() {
   
   // Step 2: Set the web app URL to the known deployment
   Logger.log('Step 2: Setting web app URL...');
-  var webAppUrl = 'https://script.google.com/macros/s/AKfycbx-IEEieMEvXPf0cXC_R_y6KKtWOMkA2nXJkU1mu8XlIMY7MnCn5eamrzjzvre0frZm0Q/exec';
+  var webAppUrl = CANONICAL_WEB_APP_URL;
   try {
     var props = PropertiesService.getScriptProperties();
     props.setProperty('WEB_APP_EXEC_URL', webAppUrl);

@@ -84,8 +84,18 @@ function doGet(e) {
     return serveBrandSelector_();
 
   } catch (err) {
-    logEvent_(traceId, '', '', 'ROUTER_ERROR', { error: String(err), stack: err.stack });
-    return serveErrorPage_('System Error', 'An unexpected error occurred. Please try again.', traceId);
+    try { logEvent_(traceId, '', '', 'ROUTER_ERROR', { error: String(err), stack: err.stack }); } catch (_) {}
+    try {
+      return serveErrorPage_('System Error', 'An unexpected error occurred. Please try again.', traceId);
+    } catch (innerErr) {
+      // serveErrorPage_ itself failed — return hard-coded HTML so the user never sees a blank grey page
+      return HtmlService.createHtmlOutput(
+        '<html><body style="font-family:sans-serif;padding:40px;text-align:center;">' +
+        '<h1 style="color:#c00;">System Error</h1>' +
+        '<p>An unexpected error occurred. Please try again later.</p>' +
+        '<p style="color:#999;font-size:12px;">Trace: ' + (traceId || 'n/a') + '</p></body></html>'
+      ).setTitle('Error').setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+    }
   }
 }
 
@@ -153,8 +163,17 @@ function doPost(e) {
     return jsonResponse_({ ok: false, error: 'Unknown POST action' });
 
   } catch (err) {
-    logEvent_(traceId, '', '', 'ROUTER_ERROR', { error: String(err), stack: err.stack });
-    return serveErrorPage_('System Error', 'An unexpected error occurred. Please try again.', traceId);
+    try { logEvent_(traceId, '', '', 'ROUTER_ERROR', { error: String(err), stack: err.stack }); } catch (_) {}
+    try {
+      return serveErrorPage_('System Error', 'An unexpected error occurred. Please try again.', traceId);
+    } catch (innerErr) {
+      return HtmlService.createHtmlOutput(
+        '<html><body style="font-family:sans-serif;padding:40px;text-align:center;">' +
+        '<h1 style="color:#c00;">System Error</h1>' +
+        '<p>An unexpected error occurred. Please try again later.</p>' +
+        '<p style="color:#999;font-size:12px;">Trace: ' + (traceId || 'n/a') + '</p></body></html>'
+      ).setTitle('Error').setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+    }
   }
 }
 
@@ -218,11 +237,43 @@ function serveDiagPage_(brand, traceId) {
   try {
     var url = getWebAppUrl_();
     var isExec = url.indexOf('/exec') !== -1;
-    results.push({ test: 'Web App URL', ok: isExec, detail: url.substring(0, 80) + (isExec ? '' : ' WARNING: not /exec') });
+    results.push({ test: 'Web App URL (getWebAppUrl_)', ok: isExec, detail: url.substring(0, 80) + (isExec ? '' : ' WARNING: not /exec') });
     if (!isExec) ok = false;
   } catch (e) {
-    results.push({ test: 'Web App URL', ok: false, detail: String(e) });
+    results.push({ test: 'Web App URL (getWebAppUrl_)', ok: false, detail: String(e) });
     ok = false;
+  }
+
+  // 3b. Exec Base URL (single source of truth)
+  try {
+    var execBase = getExecBaseUrl_();
+    var isExecB = execBase.indexOf('/exec') !== -1;
+    results.push({ test: 'Exec Base URL (getExecBaseUrl_)', ok: isExecB, detail: execBase.substring(0, 80) });
+    if (!isExecB) ok = false;
+  } catch (e) {
+    results.push({ test: 'Exec Base URL (getExecBaseUrl_)', ok: false, detail: String(e) });
+    ok = false;
+  }
+
+  // 3c. Email CTA Base URL
+  try {
+    var ctaBase = getEmailCtaBaseUrl_();
+    var matchesCanonical = (ctaBase === CANONICAL_WEB_APP_URL);
+    results.push({ test: 'Email CTA Base', ok: true, detail: ctaBase.substring(0, 80) + (matchesCanonical ? ' (=CANONICAL)' : ' (override)') });
+  } catch (e) {
+    results.push({ test: 'Email CTA Base', ok: false, detail: String(e) });
+    ok = false;
+  }
+
+  // 3d. CANONICAL constant
+  results.push({ test: 'CANONICAL_WEB_APP_URL', ok: true, detail: CANONICAL_WEB_APP_URL.substring(0, 80) });
+
+  // 3e. Script Property WEB_APP_EXEC_URL
+  try {
+    var propVal = PropertiesService.getScriptProperties().getProperty('WEB_APP_EXEC_URL') || '(not set)';
+    results.push({ test: 'Script Prop WEB_APP_EXEC_URL', ok: propVal !== '(not set)', detail: String(propVal).substring(0, 80) });
+  } catch (e) {
+    results.push({ test: 'Script Prop WEB_APP_EXEC_URL', ok: false, detail: String(e) });
   }
   
   // 4. Email quota

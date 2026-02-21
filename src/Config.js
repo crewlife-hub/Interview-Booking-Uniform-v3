@@ -6,34 +6,46 @@
 
 var APP_VERSION = '1.0.0';
 var CONFIG_SHEET_ID = '1qM3ZEdBsvbEofDH8DayRWcRa4bUcrKQIv8kzKSYZ1AM';
-// Default exec URL — replaceable via Script Properties `WEB_APP_EXEC_URL` or `DEPLOY_ID`
-var WEB_APP_EXEC_URL_DEFAULT = 'https://script.google.com/macros/s/AKfycbzL1GZHA4DoMNhDT5-6LuYlXw2YPyYZI444dJFOHvrUtPXZorO4P7Sx1i8-Qe1bKKmxPQ/exec';
-var WEB_APP_EXEC_URL_TARGET = 'https://script.google.com/macros/s/AKfycbx-IEEieMEvXPf0cXC_R_y6KKtWOMkA2nXJkU1mu8XlIMY7MnCn5eamrzjzvre0frZm0Q/exec';
 
 /**
- * CANONICAL web app URL used for ALL email CTAs.
- * This MUST be the token-gate entry point — never a calendar URL.
- * Email CTA helpers call this instead of getWebAppUrl_() to guarantee
- * the link is always the correct /exec endpoint regardless of script properties.
- * Deployment @104 - Feb 19 2026 - FINAL CTA FIX.
+ * CANONICAL web app exec URL — the single hard-coded fallback.
+ * Script Property `WEB_APP_EXEC_URL` takes precedence when set.
+ * All email CTAs and page links resolve through getExecBaseUrl_().
  */
 var CANONICAL_WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbx-IEEieMEvXPf0cXC_R_y6KKtWOMkA2nXJkU1mu8XlIMY7MnCn5eamrzjzvre0frZm0Q/exec';
 
 /**
+ * Single source of truth for the deployed web app /exec URL.
+ * Resolution order:
+ *   1. Script Property  WEB_APP_EXEC_URL  (set via admin panel or setWebAppExecUrl_)
+ *   2. Hard-coded       CANONICAL_WEB_APP_URL
+ * NEVER throws — always returns a usable URL.
+ * @returns {string} Full /exec URL (no trailing slash)
+ */
+function getExecBaseUrl_() {
+  try {
+    var propUrl = String(
+      PropertiesService.getScriptProperties().getProperty('WEB_APP_EXEC_URL') || ''
+    ).trim();
+    if (propUrl) {
+      if (propUrl.slice(-1) === '/') propUrl = propUrl.slice(0, -1);
+      return propUrl;
+    }
+  } catch (e) {
+    Logger.log('[getExecBaseUrl_] Script Properties read error: %s', e);
+  }
+  return CANONICAL_WEB_APP_URL;
+}
+
+/**
  * Return the web app base URL for email CTAs.
- * REQUIRED: must be configured via Script Properties `WEB_APP_EXEC_URL`.
+ * Delegates to getExecBaseUrl_() — never throws.
  * @returns {string}
  */
 function getEmailCtaBaseUrl_() {
-  var props = PropertiesService.getScriptProperties();
-  var propUrl = String(props.getProperty('WEB_APP_EXEC_URL') || '').trim();
-  if (!propUrl) {
-    throw new Error('Missing Script Property WEB_APP_EXEC_URL. Set it to the deployed web app /exec URL.');
-  }
-  // Normalize trailing slash only (do not invent/replace URLs)
-  if (propUrl.slice(-1) === '/') propUrl = propUrl.slice(0, -1);
-  Logger.log('[getEmailCtaBaseUrl_] WEB_APP_EXEC_URL=%s', propUrl);
-  return propUrl;
+  var url = getExecBaseUrl_();
+  Logger.log('[getEmailCtaBaseUrl_] resolved=%s', url);
+  return url;
 }
 
 /**
@@ -141,9 +153,9 @@ function setWebAppExecUrl_(url) {
  */
 function SET_WEBAPP_EXEC_URL() {
   var props = PropertiesService.getScriptProperties();
-  props.setProperty('WEB_APP_EXEC_URL', WEB_APP_EXEC_URL_TARGET);
-  Logger.log('WEB_APP_EXEC_URL set to: ' + WEB_APP_EXEC_URL_TARGET);
-  return WEB_APP_EXEC_URL_TARGET;
+  props.setProperty('WEB_APP_EXEC_URL', CANONICAL_WEB_APP_URL);
+  Logger.log('WEB_APP_EXEC_URL set to: ' + CANONICAL_WEB_APP_URL);
+  return CANONICAL_WEB_APP_URL;
 }
 
 /**
@@ -153,7 +165,7 @@ function SET_WEBAPP_EXEC_URL() {
  */
 function FIX_SET_WEB_APP_EXEC_URL() {
   var props = PropertiesService.getScriptProperties();
-  props.setProperty('WEB_APP_EXEC_URL', WEB_APP_EXEC_URL_TARGET);
+  props.setProperty('WEB_APP_EXEC_URL', CANONICAL_WEB_APP_URL);
   var finalUrl = getWebAppUrl_();
   Logger.log('FIX_SET_WEB_APP_EXEC_URL -> WEB_APP_EXEC_URL: ' + finalUrl);
   return finalUrl;
@@ -210,27 +222,11 @@ function getSmartsheetIdForBrand_(brand) {
 }
 
 /**
- * Get the deployed web app URL
+ * Get the deployed web app URL — for page links, verify URLs, etc.
+ * Delegates to getExecBaseUrl_() so every path in the app resolves
+ * the same canonical URL.
  * @returns {string} Web app URL
  */
 function getWebAppUrl_() {
-  var props = PropertiesService.getScriptProperties();
-  var configured = props.getProperty('WEB_APP_EXEC_URL') || '';
-  if (configured) return configured;
-  var deployId = props.getProperty('DEPLOY_ID') || '';
-  if (deployId) return 'https://script.google.com/macros/s/' + deployId + '/exec';
-
-  try {
-    var url = ScriptApp.getService().getUrl();
-    if (!url) return '';
-    // If running in editor dev mode, convert to the stable exec URL when possible
-    if (url.indexOf('/dev') !== -1) {
-      return url.replace(/\/dev$/, '/exec');
-    }
-    // Prefer an exec URL if already present
-    if (url.indexOf('/exec') !== -1) return url;
-    return url;
-  } catch (e) {
-    return WEB_APP_EXEC_URL_DEFAULT;
-  }
+  return getExecBaseUrl_();
 }
