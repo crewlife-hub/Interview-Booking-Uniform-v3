@@ -172,14 +172,19 @@ function findBlockingInviteInTokens_(params) {
   } catch (e) {}
 
   // Apply decision rules to latest row only.
-  if (latestStatus === 'USED') {
-    return { blocked: true, found: true, rowIndex: latestR + 1, status: latestStatus, locked: latestLocked, tokenPrefix: tokenPrefix, reason: 'LATEST_USED' };
-  }
+  // 1) latest.Locked == LOCKED => BLOCK
   if (latestLocked === 'LOCKED') {
     return { blocked: true, found: true, rowIndex: latestR + 1, status: latestStatus, locked: latestLocked, tokenPrefix: tokenPrefix, reason: 'LATEST_LOCKED_FLAG' };
   }
-  if (latestLocked === 'UNLOCK') {
-    return { blocked: false, found: true, rowIndex: latestR + 1, status: latestStatus, locked: latestLocked, tokenPrefix: tokenPrefix, overrideUnlock: true, reason: 'LATEST_UNLOCK_OVERRIDE' };
+
+  // 2) latest.Locked == UNLOCK or UNLOCKED => ALLOW (even if Status == USED)
+  if (latestLocked === 'UNLOCK' || latestLocked === 'UNLOCKED') {
+    return { blocked: false, found: true, rowIndex: latestR + 1, status: latestStatus, locked: latestLocked, tokenPrefix: tokenPrefix, overrideUnlock: true, reason: 'LATEST_UNLOCKED_OVERRIDE' };
+  }
+
+  // 3) Locked blank => follow Status rules
+  if (latestStatus === 'USED') {
+    return { blocked: true, found: true, rowIndex: latestR + 1, status: latestStatus, locked: latestLocked, tokenPrefix: tokenPrefix, reason: 'LATEST_USED' };
   }
   if (latestStatus === 'LOCKED') {
     return { blocked: true, found: true, rowIndex: latestR + 1, status: latestStatus, locked: latestLocked, tokenPrefix: tokenPrefix, reason: 'LATEST_LOCKED_STATUS' };

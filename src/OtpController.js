@@ -98,13 +98,13 @@ function checkInviteReuseGuard_(brand, email, textForEmail, traceId) {
   }
 
   if (decision && decision.overrideUnlock) {
-    Logger.log('[INVITE_OVERRIDE_UNLOCK] key=%s latestRowId=%s latestLocked=%s latestStatus=%s', key, decision.rowIndex || '?', decision.locked || '', decision.status || '');
+    Logger.log('[INVITE_OVERRIDE_UNLOCKED] key=%s latestRow=%s latestStatus=%s latestLocked=%s', key, decision.rowIndex || '?', decision.status || '', decision.locked || '');
     try {
-      logEvent_(traceId, brand, email, 'INVITE_OVERRIDE_UNLOCK', {
+      logEvent_(traceId, brand, email, 'INVITE_OVERRIDE_UNLOCKED', {
         key: key,
-        latestRowId: decision.rowIndex || null,
-        latestLocked: decision.locked || null,
-        latestStatus: decision.status || null
+        latestRow: decision.rowIndex || null,
+        latestStatus: decision.status || null,
+        latestLocked: decision.locked || null
       });
     } catch (e) {}
     return { blocked: false, key: key, emailHash: emailHash, match: decision };
