@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Interview Verification - <?= brand ?></title>
+  <?!= include('SharedStyles') ?>
+</head>
+<body>
+  <div class="container">
+    <div class="card">
+      <div class="icon-circle info">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+          <circle cx="8.5" cy="7" r="4"/>
+          <polyline points="17 11 19 13 23 9"/>
+        </svg>
+      </div>
+      
+      <h1>Verify Your Identity</h1>
+      <div class="brand-name"><?= brand ?></div>
+      
+      <p>Please confirm your details to proceed with booking your interview.</p>
+      
+      <form id="otpRequestForm" onsubmit="handleSubmit(event)">
+        <input type="hidden" name="brand" value="<?= brand ?>">
+        <input type="hidden" name="rowId" value="<?= rowId ?>">
+        <input type="hidden" name="ts" value="<?= ts ?>">
+        <input type="hidden" name="sig" value="<?= sig ?>">
+        
+        <div class="form-group">
+          <label for="email">Email Address</label>
+          <input 
+            type="email" 
+            id="email" 
+            name="email" 
+            placeholder="Enter your email address"
+            required
+            autocomplete="email"
+          >
+        </div>
+        
+        <div class="form-group">
+          <label for="textForEmail">Position</label>
+          <select id="textForEmail" name="textForEmail" required>
+            <option value="">Select your position...</option>
+            <? for (var i = 0; i < jobs.length; i++) { ?>
+              <option value="<?= jobs[i] ?>"><?= jobs[i] ?></option>
+            <? } ?>
+            <? if (jobs.length === 0) { ?>
+              <option value="" disabled>No positions available</option>
+            <? } ?>
+          </select>
+        </div>
+        
+        <button type="submit" class="btn btn-primary">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M22 2L11 13"/>
+            <path d="M22 2L15 22L11 13L2 9L22 2Z"/>
+          </svg>
+          Send Verification Code
+        </button>
+      </form>
+      
+      <p class="help-text">
+        A verification code will be sent to your email address.
+      </p>
+    </div>
+  </div>
+  
+  <?!= include('SharedScripts') ?>
+  
+  <script>
+    function handleSubmit(e) {
+      e.preventDefault();
+      
+      const form = e.target;
+      const email = document.getElementById('email').value.trim();
+      const textForEmail = document.getElementById('textForEmail').value;
+      
+      // Validate email
+      if (!isValidEmail(email)) {
+        showError('Please enter a valid email address.');
+        return;
+      }
+      
+      // Validate position
+      if (!textForEmail) {
+        showError('Please select your position.');
+        return;
+      }
+      
+      submitForm(form, 'request_otp', function(error, data) {
+        if (error) {
+          showError('An error occurred. Please try again.');
+          return;
+        }
+        
+        if (data.success) {
+          // Redirect to OTP verify page
+          redirectTo(data.redirectUrl);
+        } else {
+          showError(data.error || 'Verification failed. Please check your details.');
+        }
+      });
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Request OTP – <?= brandName ?></title>
+  <?!= include_('Styles'); ?>
+  <style>
+    .hero-banner {
+      background: linear-gradient(135deg, #1a237e, #0d47a1);
+      padding: 30px 20px;
+      text-align: center;
+      color: white;
+    }
+    .hero-banner h2 {
+      margin: 10px 0;
+      font-size: 20px;
+    }
+    .hero-banner .lock-icon {
+      font-size: 40px;
+    }
+    .greeting {
+      font-size: 28px;
+      text-align: center;
+      margin: 20px 0;
+    }
+    .position-badge {
+      background: #0d6efd;
+      color: white;
+      padding: 20px;
+      border-radius: 8px;
+      text-align: center;
+      font-size: 18px;
+      margin: 20px 0;
+    }
+    .info-box {
+      background: #e3f2fd;
+      border: 1px solid #90caf9;
+      border-radius: 8px;
+      padding: 15px;
+      margin: 20px 0;
+    }
+    .checklist {
+      list-style: none;
+      padding: 0;
+    }
+    .checklist li {
+      padding: 8px 0;
+      color: #28a745;
+    }
+    .checklist li::before {
+      content: "✅ ";
+    }
+    .otp-sent-message {
+      background: #d4edda;
+      border: 1px solid #c3e6cb;
+      border-radius: 8px;
+      padding: 20px;
+      text-align: center;
+      margin: 20px 0;
+    }
+    .spinner {
+      display: inline-block;
+      width: 20px;
+      height: 20px;
+      border: 3px solid rgba(255,255,255,.3);
+      border-radius: 50%;
+      border-top-color: #fff;
+      animation: spin 1s ease-in-out infinite;
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+  </style>
+</head>
+<body>
+  <div class="hero-banner">
+    <div class="lock-icon">🔒</div>
+    <h2>SECURE YOUR INTERVIEW BOOKING</h2>
+    <p>Crew Life at Sea</p>
+  </div>
+  
+  <div class="container">
+    <div class="card" style="max-width: 600px; margin: 20px auto;">
+      <div class="greeting">
+        🎉 <strong>Congratulations, <?= firstName ?>!</strong>
+      </div>
+      
+      <p style="text-align: center;">
+        You've reached the interview stage for the position of:
+      </p>
+      
+      <div class="position-badge">
+        📌 <strong><?= textForEmail ?></strong> 📌
+      </div>
+      
+      <? if (clCode && recruiterName) { ?>
+      <div class="info-box">
+        <p><strong>Recruiter:</strong> <?= recruiterName ?></p>
+        <p><strong>Reference:</strong> <?= clCode ?></p>
+      </div>
+      <? } ?>
+      
+      <p><strong>Make sure you're ready:</strong></p>
+      <ul class="checklist">
+        <li>Be online at least 10 minutes early</li>
+        <li>Test your connection and camera (if online)</li>
+        <li>Dress professionally</li>
+        <li>Have your CV and any required documents ready</li>
+      </ul>
+      
+      <div id="requestSection">
+        <p style="text-align: center; margin-top: 20px;">
+          Click the button below to receive a One-Time Passcode (OTP) to your email.
+        </p>
+        
+        <div style="text-align: center;">
+          <button type="button" id="btnRequestOtp" class="btn btn-primary" onclick="requestOtp()" style="padding: 15px 40px; font-size: 18px;">
+            📧 Send OTP to My Email
+          </button>
+        </div>
+      </div>
+      
+      <div id="successSection" class="hidden">
+        <div class="otp-sent-message">
+          <h3>✅ OTP Sent!</h3>
+          <p>Check your inbox (and spam folder) for your 6-digit passcode.</p>
+          <p>It will expire in <strong id="expiryMinutes">10</strong> minutes.</p>
+        </div>
+        
+        <div style="text-align: center;">
+          <button type="button" class="btn btn-success" onclick="goToVerify()" style="padding: 15px 40px; font-size: 18px;">
+            Enter Your Passcode →
+          </button>
+        </div>
+        
+        <p style="text-align: center; margin-top: 15px;">
+          <a href="#" onclick="requestOtp(); return false;">Didn't receive it? Send again</a>
+        </p>
+      </div>
+      
+      <div id="errorSection" class="hidden">
+        <div class="alert alert-danger" id="errorMessage"></div>
+        <div style="text-align: center;">
+          <button type="button" class="btn btn-secondary" onclick="location.reload()">Try Again</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  
+  <div class="version-tag">v<?= version ?></div>
+  
+  <script>
+    var BRAND = '<?= brand ?>';
+    var EMAIL = '<?= email ?>';
+    var TEXT_FOR_EMAIL = '<?= textForEmail ?>';
+    var TIMESTAMP = '<?= timestamp ?>';
+    var SIG = '<?= sig ?>';
+    var WEBAPP_URL = '<?= webAppUrl ?>';
+    var TOKEN = '';
+    var VERIFY_URL = '';
+    
+    function requestOtp() {
+      var btn = document.getElementById('btnRequestOtp');
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner"></span> Sending...';
+      
+      google.script.run
+        .withSuccessHandler(function(result) {
+          if (result.ok) {
+            document.getElementById('requestSection').classList.add('hidden');
+            document.getElementById('successSection').classList.remove('hidden');
+            document.getElementById('expiryMinutes').textContent = result.expiryMinutes || 10;
+
+            // Save token so the in-page "Go to Verify" link is deterministic
+            TOKEN = result.token || '';
+            VERIFY_URL = result.verifyUrl || '';
+          } else {
+            showError(result.error || 'Failed to send OTP');
+          }
+        })
+        .withFailureHandler(function(err) {
+          showError(err.message || 'An error occurred');
+        })
+        .handleOtpRequest_({
+          brand: BRAND,
+          email: EMAIL,
+          textForEmail: TEXT_FOR_EMAIL,
+          timestamp: TIMESTAMP,
+          sig: SIG
+        }, 'web-' + Date.now());
+    }
+    
+    function showError(msg) {
+      document.getElementById('requestSection').classList.add('hidden');
+      document.getElementById('successSection').classList.add('hidden');
+      document.getElementById('errorSection').classList.remove('hidden');
+      document.getElementById('errorMessage').textContent = msg;
+    }
+    
+    function goToVerify() {
+      var url = VERIFY_URL;
+      if (!url) {
+        url = (WEBAPP_URL || '') +
+          '?page=verify&brand=' + encodeURIComponent(BRAND) +
+          '&e=' + encodeURIComponent(EMAIL) +
+          '&t=' + encodeURIComponent(TEXT_FOR_EMAIL);
+        if (TOKEN) url += '&token=' + encodeURIComponent(TOKEN);
+      }
+      window.location.href = url;
+    }
+  </script>
+</body>
+</html>

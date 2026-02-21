@@ -1,0 +1,38 @@
+2902de4 Fri 2026-02-20 06:17:57 +0200 Interview Pass Dev <dev@seainfogroup.com> Fix Verify-it's-you: normalize calendar URLs to public format (strip /u/{n}/), add validation + admin email alerts
+c5f4ca2 Fri 2026-02-20 05:56:35 +0200 Interview Pass Dev <dev@seainfogroup.com> Fix redirects: safe JSON.stringify(deptUrl), window.top.location.href, legacy CandidateController redirect hardened
+f764a74 Fri 2026-02-20 05:41:25 +0200 Interview Pass Dev <dev@seainfogroup.com> OTP flow: open booking in new tab; use top-level secure redirect with safe deptUrl JSON
+1f74f69 Thu 2026-02-19 12:59:36 +0200 Interview Pass Dev <dev@seainfogroup.com> Smartsheet: add patchRowCellsByColumnId_ helper; patch Sideways post-send update path; add formula/locked diagnostics
+654f339 Thu 2026-02-19 11:38:08 +0200 Interview Pass Dev <dev@seainfogroup.com> Smartsheet: allow Sideways sends without booking link; force CTA to webapp token; add logs
+eea3fd5 Thu 2026-02-19 08:07:29 +0200 Interview Pass Dev <dev@seainfogroup.com> fix: detect emoji SEND Invite column and update correct title
+414bc22 Thu 2026-02-19 08:00:52 +0200 Interview Pass Dev <dev@seainfogroup.com> fix: remove default Sideways limit for manual runs; use scheduled wrapper
+50c1d5c Thu 2026-02-19 07:56:45 +0200 Interview Pass Dev <dev@seainfogroup.com> feat: add per-brand Sideways manual runners
+d59a064 Thu 2026-02-19 07:38:55 +0200 Interview Pass Dev <dev@seainfogroup.com> fix: add script.scriptapp scope for trigger management
+2867e11 Thu 2026-02-19 07:29:54 +0200 Interview Pass Dev <dev@seainfogroup.com> feat: new production email design + position field + trigger installer
+3ecd0ba Thu 2026-02-19 07:02:30 +0200 Interview Pass Dev <dev@seainfogroup.com> fix: add processsideways route to Router.js
+43dd64f Thu 2026-02-19 06:53:18 +0200 Interview Pass Dev <dev@seainfogroup.com> fix: HARDCODED CTA URL directly in function + aggressive logging
+675c858 Thu 2026-02-19 06:40:39 +0200 Interview Pass Dev <dev@seainfogroup.com> chore: update constants to @104
+bc8e277 Thu 2026-02-19 06:39:19 +0200 Interview Pass Dev <dev@seainfogroup.com> chore: update to deployment @103 + sync all src folders
+2102802 Thu 2026-02-19 06:21:55 +0200 Interview Pass Dev <dev@seainfogroup.com> chore: update URL constants to deployment @100
+42275f0 Thu 2026-02-19 06:19:37 +0200 Interview Pass Dev <dev@seainfogroup.com> fix: getEmailCtaBaseUrl_ now uses ScriptApp.getService().getUrl() dynamically - No more stale deployment URL hardcoding - Falls back to WEB_APP_EXEC_URL property then CANONICAL constant - Each deployment will use its own URL for email CTAs
+37141df Thu 2026-02-19 06:10:48 +0200 Interview Pass Dev <dev@seainfogroup.com> fix: rebuild BookingEmail.html to match production design + pass candidateName - BookingEmail.html: full redesign matching production template (Congratulations, MUST SELECT, textForEmail badge, Book Your Interview CTA) - CTA href still locked to gateUrl||accessUrl (canonical web app URL) - sendBookingConfirmEmail_: accept+pass candidateName to template - SmartsheetWorker: extract Full Name/Name/First Name from row - OtpController: pass candidate name from lookup
+34ea877 Thu 2026-02-19 06:00:30 +0200 Interview Pass Dev <dev@seainfogroup.com> fix: hardcode canonical web app URL for ALL email CTAs - Add CANONICAL_WEB_APP_URL constant + getEmailCtaBaseUrl_() in Config.js - OtpService.sendBookingConfirmEmail_: use canonical URL, block calendar URLs - EmailService.sendInviteEmail_: use canonical URL for booking link - OtpController.handleOtpVerify_: use canonical URL for access URL - Add BOOKING_EMAIL_CTA_BUILT diagnostic log to all email paths - CTA validation: reject any email link not starting with canonical base - Includes BrandSelector.html premium UI revamp
+1d0b4fd Wed 2026-02-18 11:55:33 +0200 Interview Pass Dev <dev@seainfogroup.com> fix(email-cta): force webapp gate URL for booking CTA across brands
+1ff1e39 Wed 2026-02-18 11:40:51 +0200 Interview Pass Dev <dev@seainfogroup.com> fix(cta): enforce confirm=1 webapp gate and add FIX_SET_WEB_APP_EXEC_URL
+3ce717f Wed 2026-02-18 11:18:17 +0200 Interview Pass Dev <dev@seainfogroup.com> security: route all booking CTAs via webapp access gate and add exec URL setup
+900a075 Wed 2026-02-18 10:13:08 +0200 Interview Pass Dev <dev@seainfogroup.com> fix(costa,seachefs): enforce configured column IDs and add brand sheet verifier
+dfa7763 Wed 2026-02-18 09:56:14 +0200 Interview Pass Dev <dev@seainfogroup.com> fix(seachefs): point fallback Smartsheet ID to SEACHEFS_APPLICANT_INTERVIEW_BOOKINGS
+bc9d84a Wed 2026-02-18 09:54:02 +0200 Interview Pass Dev <dev@seainfogroup.com> fix(seachefs): add sheet-name diagnostics and prefer explicit configured IDs
+e8a3dc0 Wed 2026-02-18 09:29:39 +0200 Interview Pass Dev <dev@seainfogroup.com> test: add Smartsheet brand diagnostics and align Seachefs sheet ID
+0090e69 Wed 2026-02-18 09:17:29 +0200 Interview Pass Dev <dev@seainfogroup.com> config: set Royal/Costa/Seachefs Smartsheet IDs and column IDs
+125aa3f Wed 2026-02-18 09:08:14 +0200 Interview Pass Dev <dev@seainfogroup.com> fix: support SMARTSHEET_IDS brand lists + brand options diagnostics
+c21f1f9 Wed 2026-02-18 08:39:28 +0200 Interview Pass Dev <dev@seainfogroup.com> ui: wording - Position Applied and user-facing messages
+87d4170 Wed 2026-02-18 08:21:03 +0200 Interview Pass Dev <dev@seainfogroup.com> feat: strict one-time confirm-gated secure redirect
+4e66e90 Wed 2026-02-18 07:33:04 +0200 Interview Pass Dev <dev@seainfogroup.com> chore: add one-click schema repair runners
+70c52e4 Wed 2026-02-18 07:25:54 +0200 Interview Pass Dev <dev@seainfogroup.com> chore: add config sheet schema repair utility
+4ad65a1 Wed 2026-02-18 06:54:20 +0200 Interview Pass Dev <dev@seainfogroup.com> fix: unified booking - ANY-sheet match, Smartsheet TFE dropdown, Interview Link redirect
+23ef443 Wed 2026-02-18 06:08:01 +0200 Interview Pass Dev <dev@seainfogroup.com> Init: connect clasp + scripts
+479a664 Mon 2026-02-16 15:49:54 +0200 Ray <crewlife@seainfogroup.com> Cleaned up duplicate .gs files and standardized on .js
+d7542f5 Mon 2026-02-16 15:31:44 +0200 Ray <crewlife@seainfogroup.com> Resolved conflicts by keeping local versions
+9065fc7 Mon 2026-02-16 15:30:45 +0200 Ray <crewlife@seainfogroup.com> Initial commit from local project
+7757393 Sat 2026-01-24 17:44:29 +0200 Ray <crewlife@seainfogroup.com> Fix: Remove browser URL API usage for Apps Script compatibility
+0bb1212 Sat 2026-01-24 17:25:23 +0200 Ray <crewlife@seainfogroup.com> Initial import: Interview Booking Uniform System v3

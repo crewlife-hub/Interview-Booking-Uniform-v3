@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="referrer" content="no-referrer">
+  <meta name="robots" content="noindex,nofollow">
+  <title>Redirecting…</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      margin: 0;
+      background: #f5f5f5;
+    }
+    .redirect-box {
+      text-align: center;
+      padding: 40px;
+      background: #fff;
+      border-radius: 12px;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.1);
+      max-width: 400px;
+    }
+    .spinner {
+      display: inline-block;
+      width: 40px;
+      height: 40px;
+      border: 4px solid #e0e0e0;
+      border-top-color: #0d6efd;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    noscript .redirect-box { background: #fff3cd; }
+  </style>
+</head>
+<body>
+  <div class="redirect-box" id="redirectBox">
+    <div class="spinner"></div>
+    <h3 style="margin: 20px 0 10px;">Opening Scheduling Page…</h3>
+    <p style="color: #666;">Please wait. You will be redirected momentarily.</p>
+  </div>
+
+  <noscript>
+    <div class="redirect-box">
+      <h3>JavaScript Required</h3>
+      <p>Please enable JavaScript in your browser to proceed to the scheduling page.</p>
+    </div>
+  </noscript>
+
+  <!-- Booking URL is ONLY in this script block — never in visible HTML or href attributes -->
+  <script>
+    (function() {
+      try {
+        var deptUrl = <?!= JSON.stringify(deptUrl) ?>;
+        if (!deptUrl) throw new Error('Missing booking URL');
+        try {
+          window.top.location.href = deptUrl;
+        } catch (topErr) {
+          window.location.href = deptUrl;
+        }
+      } catch (e) {
+        document.getElementById('redirectBox').innerHTML =
+          '<h3 style="color:#dc3545;">Redirect Error</h3>' +
+          '<p>Could not open the scheduling page. Please contact your recruiter.</p>';
+      }
+    })();
+  </script>
+</body>
+</html>

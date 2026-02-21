@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Diagnostics – CrewLife</title>
+  <?!= include_('Styles'); ?>
+  <style>
+    .diag-section { margin-bottom: 2rem; }
+    .diag-section h2 { margin-bottom: 1rem; color: #333; border-bottom: 2px solid #0b57d0; padding-bottom: 0.5rem; }
+    .diag-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+    .diag-table th, .diag-table td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+    .diag-table th { background: #f5f5f5; font-weight: 600; }
+    .diag-table tr:nth-child(even) { background: #fafafa; }
+    .status-ok { color: #1a7f37; font-weight: bold; }
+    .status-fail { color: #cf222e; font-weight: bold; }
+    .status-pending { color: #9a6700; }
+    .status-issued { color: #0b57d0; }
+    .status-used { color: #6c757d; }
+    .mono { font-family: monospace; font-size: 0.8rem; }
+    .truncate { max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; font-weight: 600; }
+    .badge-ok { background: #d1fae5; color: #065f46; }
+    .badge-error { background: #fee2e2; color: #991b1b; }
+    .badge-warn { background: #fef3c7; color: #92400e; }
+    .badge-info { background: #dbeafe; color: #1e40af; }
+    .header-bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; }
+    .user-info { font-size: 0.85rem; color: #666; }
+    .dry-run-banner { background: #fef3c7; border: 1px solid #f59e0b; padding: 0.75rem; border-radius: 8px; margin-bottom: 1rem; }
+    .btn { display: inline-block; padding: 8px 16px; border-radius: 6px; font-weight: 600; text-decoration: none; cursor: pointer; border: none; }
+    .btn-primary { background: #0b57d0; color: white; }
+    .btn-secondary { background: #f1f3f5; color: #333; border: 1px solid #ddd; }
+    .actions { margin-top: 1rem; }
+    .timestamp { font-size: 0.75rem; color: #888; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header-bar">
+      <h1>System Diagnostics</h1>
+      <div class="user-info">
+        User: <?= userEmail || 'anonymous' ?><br>
+        Trace: <span class="mono"><?= traceId ?></span>
+      </div>
+    </div>
+    
+    <? if (dryRun) { ?>
+    <div class="dry-run-banner">
+      <strong>⚠️ DRY RUN MODE:</strong> Email sending and Smartsheet updates are disabled.
+    </div>
+    <? } ?>
+    
+    <!-- Brand Configurations -->
+    <div class="diag-section">
+      <h2>Brand Configurations</h2>
+      <table class="diag-table">
+        <thead>
+          <tr>
+            <th>Brand</th>
+            <th>Smartsheet ID</th>
+            <th>Email Column ID</th>
+            <th>Text For Email Column ID</th>
+            <th>Trigger Column</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          <? for (var i = 0; i < brandConfigs.length; i++) { var bc = brandConfigs[i]; ?>
+          <tr>
+            <td><strong><?= bc.brand ?></strong></td>
+            <td class="mono"><?= bc.smartsheetId || '-' ?></td>
+            <td class="mono"><?= bc.emailColumnId || '-' ?></td>
+            <td class="mono"><?= bc.textForEmailColumnId || '-' ?></td>
+            <td class="truncate"><?= bc.triggerColumn || '-' ?></td>
+            <td>
+              <? if (bc.sheetOk) { ?>
+              <span class="badge badge-ok">OK</span>
+              <? } else { ?>
+              <span class="badge badge-error">ERROR</span>
+              <? } ?>
+            </td>
+          </tr>
+          <? } ?>
+        </tbody>
+      </table>
+    </div>
+    
+    <!-- Recent Tokens -->
+    <div class="diag-section">
+      <h2>Recent Tokens (Last 50)</h2>
+      <table class="diag-table">
+        <thead>
+          <tr>
+            <th>Created</th>
+            <th>Brand</th>
+            <th>Email Hash</th>
+            <th>OTP Status</th>
+            <th>Token Status</th>
+            <th>Text For Email</th>
+            <th>Trace ID</th>
+          </tr>
+        </thead>
+        <tbody>
+          <? for (var i = 0; i < tokens.length; i++) { var t = tokens[i]; ?>
+          <tr>
+            <td class="timestamp"><?= t['Created At'] ? new Date(t['Created At']).toISOString().substring(0, 19) : '-' ?></td>
+            <td><?= t['Brand'] || '-' ?></td>
+            <td class="mono truncate"><?= t['Email Hash'] ? String(t['Email Hash']).substring(0, 16) + '...' : '-' ?></td>
+            <td>
+              <? var os = t['OTP Status'] || ''; ?>
+              <span class="badge <?= os === 'VERIFIED' ? 'badge-ok' : (os === 'PENDING' ? 'badge-warn' : 'badge-info') ?>"><?= os || '-' ?></span>
+            </td>
+            <td>
+              <? var ts = t['Token Status'] || ''; ?>
+              <span class="badge <?= ts === 'ISSUED' ? 'badge-info' : (ts === 'USED' ? 'badge-ok' : 'badge-warn') ?>"><?= ts || '-' ?></span>
+            </td>
+            <td class="truncate"><?= t['Text For Email'] || '-' ?></td>
+            <td class="mono"><?= t['Trace ID'] ? String(t['Trace ID']).substring(0, 8) : '-' ?></td>
+          </tr>
+          <? } ?>
+        </tbody>
+      </table>
+    </div>
+    
+    <!-- Recent Logs -->
+    <div class="diag-section">
+      <h2>Recent Logs (Last 50)</h2>
+      <table class="diag-table">
+        <thead>
+          <tr>
+            <th>Timestamp</th>
+            <th>Brand</th>
+            <th>Event</th>
+            <th>Result</th>
+            <th>Message</th>
+            <th>Function</th>
+            <th>Trace ID</th>
+          </tr>
+        </thead>
+        <tbody>
+          <? for (var i = 0; i < logs.length; i++) { var log = logs[i]; ?>
+          <tr>
+            <td class="timestamp"><?= log['Timestamp'] ? new Date(log['Timestamp']).toISOString().substring(0, 19) : '-' ?></td>
+            <td><?= log['Brand'] || '-' ?></td>
+            <td class="mono"><?= log['Event'] || '-' ?></td>
+            <td>
+              <? var lr = log['Result'] || ''; ?>
+              <span class="badge <?= lr === 'OK' ? 'badge-ok' : (lr === 'ERROR' ? 'badge-error' : 'badge-info') ?>"><?= lr || '-' ?></span>
+            </td>
+            <td class="truncate"><?= log['Message'] || '-' ?></td>
+            <td class="mono"><?= log['Function'] || '-' ?></td>
+            <td class="mono"><?= log['Trace ID'] ? String(log['Trace ID']).substring(0, 8) : '-' ?></td>
+          </tr>
+          <? } ?>
+        </tbody>
+      </table>
+    </div>
+    
+    <!-- Actions -->
+    <div class="diag-section actions">
+      <h2>Actions</h2>
+      <a href="<?= webAppUrl ?>?page=admin" class="btn btn-primary">Admin Console</a>
+      <a href="<?= webAppUrl ?>" class="btn btn-secondary">Home</a>
+      <button onclick="runDispatcher()" class="btn btn-secondary">Run Dispatcher</button>
+      <div id="dispatcherResult" style="margin-top: 1rem;"></div>
+    </div>
+    
+    <p class="timestamp" style="margin-top: 2rem;">Version: <?= version ?></p>
+  </div>
+  
+  <script>
+    function runDispatcher() {
+      var brand = prompt('Enter brand code (e.g., ROYAL):');
+      if (!brand) return;
+      
+      document.getElementById('dispatcherResult').innerHTML = 'Running dispatcher...';
+      
+      fetch('<?= webAppUrl ?>', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: 'action=rundispatcher&brand=' + encodeURIComponent(brand)
+      })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        document.getElementById('dispatcherResult').innerHTML = 
+          '<pre>' + JSON.stringify(data, null, 2) + '</pre>';
+      })
+      .catch(function(err) {
+        document.getElementById('dispatcherResult').innerHTML = 
+          '<span class="status-fail">Error: ' + err + '</span>';
+      });
+    }
+  </script>
+</body>
+</html>

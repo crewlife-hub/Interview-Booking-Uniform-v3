@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Crew Life at Sea – Schedule Your Interview</title>
+  <style>
+    body  { font-family: Arial, sans-serif; background:#e8f0ff; margin:0; padding:0; }
+    .card { max-width:700px; margin:30px auto; background:#fff; padding:32px;
+            border-radius:14px; box-shadow:0 4px 12px rgba(0,0,0,.08);
+            border:1px solid #e6ecf2; }
+    .logo      { max-width:280px; height:auto; display:block; margin:0 auto 24px; }
+    h1         { color:#004aad; font-size:24px; margin:0 0 12px; text-align:center; }
+    p          { font-size:15px; line-height:1.6; color:#333; margin:0 0 14px; }
+    .checklist   { list-style:none; padding:0; margin:10px 0 18px; }
+    .checklist li{ margin:8px 0; }
+    .check       { margin-right:8px; color:#28a745; font-weight:bold; }
+    .cta       { display:inline-block; padding:14px 28px; background:#004aad; color:#fff!important;
+                 border-radius:8px; text-decoration:none; font-weight:bold; }
+    .warning         { background:#ffe6e6; border:2px solid #d32f2f; border-radius:10px;
+                       padding:16px; margin:24px 0 12px; text-align:center; }
+    .warning h2      { color:#d32f2f; font-size:22px; margin:0; font-weight:900; letter-spacing:.5px; }
+    .pickNote        { color:#d32f2f; font-weight:900; text-align:center; margin:8px 0 12px; }
+    .optionCard      { background:#e3f7ff; border:2px solid #004aad; border-radius:10px;
+                       padding:18px; margin:10px 0 24px; text-align:center; }
+    .optionCard span { color:#004aad; font-size:26px; font-weight:900; white-space:nowrap; }
+    .footer    { font-size:12px; color:#777; text-align:center; margin-top:32px; }
+    .social a  { display:inline-block; margin:0 6px; }
+    .social img{ width:60px; height:auto; vertical-align:middle; border:none; }
+    .divider   { height:1px; background:#e6ecf2; margin:32px 0; }
+  </style>
+</head>
+<body>
+  <div class="card">
+
+    <!-- Top logo -->
+    <img src="https://drive.google.com/uc?export=view&id=14QG9NxU64rtJUzD60mJwcz_JTGRTgekA"
+         alt="Crew Life at Sea" class="logo">
+
+    <!-- Greeting -->
+    <h1>&#127881; Congratulations, <?= candidateName ?>!</h1>
+
+    <!-- Opener -->
+    <p style="text-align:center;">Congratulations on progressing to the next phase of our hiring journey!</p>
+    <p>You've taken another important step toward joining the Crew Life at Sea family, and we're genuinely excited about the skills you could bring on board.</p>
+    <p>You've reached the interview stage for the position of <b><?= position ?></b>.</p>
+    <p>Please review the details below and follow the instructions carefully to secure your slot.</p>
+
+    <!-- Red warning header -->
+    <div class="warning">
+      <h2>&#9888;&#65039; MUST SELECT THE OPTION BELOW &#9888;&#65039;</h2>
+    </div>
+
+    <!-- Note & light-blue option card -->
+    <p class="pickNote">Make sure to select this when booking your interview&nbsp;!!!</p>
+    <div class="optionCard">
+      <span>&#128204; <?= textForEmail ?> &#128204;</span>
+    </div>
+
+    <!-- 10-minute validity notice & checklist -->
+    <p><b>Please note:</b> This link is valid for <b>10&nbsp;minutes</b> and can only be used once.</p>
+    <p><b>Make sure you're ready:</b></p>
+    <ul class="checklist">
+      <li><span class="check">&#10004;</span>Be online at least 10&nbsp;minutes early</li>
+      <li><span class="check">&#10004;</span>Test your connection and camera (if online)</li>
+      <li><span class="check">&#10004;</span>Dress professionally</li>
+      <li><span class="check">&#10004;</span>Have your CV and any required documents ready</li>
+    </ul>
+
+    <!-- CTA — ALWAYS uses canonical token gate URL, NEVER a calendar link -->
+    <p style="text-align:center;">
+      <a href="<?= ctaUrl || gateUrl || accessUrl ?>" class="cta">Book Your Interview</a>
+    </p>
+
+    <div class="divider"></div>
+
+    <!-- Footer logo -->
+    <div class="header">
+      <img src="https://drive.google.com/uc?export=view&id=14QG9NxU64rtJUzD60mJwcz_JTGRTgekA"
+           alt="Crew Life at Sea" class="logo">
+    </div>
+
+    <!-- Social & footer -->
+    <div class="footer">
+      <p class="social">
+        <a href="https://www.facebook.com/crewlifeatsea" target="_blank">
+          <img src="https://drive.google.com/uc?export=view&id=1mnneck9bxbVnin-84nxGL1a2XQNnz7Ev" alt="Facebook">
+        </a>
+        <a href="https://www.instagram.com/crewlifeatsea/" target="_blank">
+          <img src="https://drive.google.com/uc?export=view&id=1NS7jJLP0h3w-76nU2JOeCg-MR2_dddaL" alt="Instagram">
+        </a>
+        <a href="https://x.com/crewlifeatsea" target="_blank">
+          <img src="https://drive.google.com/uc?export=view&id=1Q5QgueQiyoqbD_bceoseKARYi2zytEFz" alt="X">
+        </a>
+        <a href="https://www.linkedin.com/in/crew-life-at-sea/" target="_blank">
+          <img src="https://drive.google.com/uc?export=view&id=1iEopBqIpO-XZTtZCrowV566YxfFh4TyG" alt="LinkedIn">
+        </a>
+        <a href="https://www.tiktok.com/@crewlifeatsea" target="_blank">
+          <img src="https://drive.google.com/uc?export=view&id=1TW2QZ__LBXKL4paJcYE-2aGYhsaXILFW" alt="TikTok">
+        </a>
+        <a href="https://www.youtube.com/@crewlifeatsea" target="_blank">
+          <img src="https://drive.google.com/uc?export=view&id=1BwXYTz-_lke85nz3riLDvgfJPWYl9jsG" alt="YouTube">
+        </a>
+      </p>
+      <p>&#169; Crew Life at Sea Pty Ltd &#8211; All Rights Reserved</p>
+      <p><i>This email and any attachments are confidential and intended only for the recipient.
+             If you are not the intended recipient, please notify us and delete this message.</i></p>
+    </div>
+  </div><!-- /.card -->
+</body>
+</html>

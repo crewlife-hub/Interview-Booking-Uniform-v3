@@ -9,3 +9,9 @@
 **/staged-merge-*/**
 **/temp_gs/**
 **/*.bak
+
+# Prevent duplicate server-side definitions: we deploy the .js files only
+**/*.gs
+
+# Ignore upstream mirror folder (keep clasp pushes clean)
+Interview-Booking-Uniform-v3-main/**
