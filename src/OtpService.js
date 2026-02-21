@@ -45,7 +45,7 @@ function createOtp_(params) {
   // If you need to re-enable rate limiting, set a script property 'ENABLE_OTP_RATE_LIMIT' = 'true'
   // and implement the check accordingly.
   
-  // Resolve TOKENS sheet early (guard must run BEFORE any writes)
+  // Resolve TOKENS sheet early
   var ss = getConfigSheet_();
   var sheet = ss.getSheetByName('TOKENS');
   if (!sheet) {
@@ -56,44 +56,8 @@ function createOtp_(params) {
     return { ok: false, error: 'System not configured' };
   }
 
-  // Global issuance guard: block if an invite has already been USED or LOCKED
-  // for the same (brand + email/emailHash + textForEmail).
-  try {
-    if (typeof findBlockingInviteInTokens_ === 'function') {
-      var block = findBlockingInviteInTokens_({
-        sheet: sheet,
-        brand: brand,
-        email: email,
-        textForEmail: textForEmail
-      });
-      if (block && block.blocked) {
-        Logger.log('[INVITE_BLOCK] brand=%s email=%s text=%s row=%s status=%s locked=%s token=%s',
-          brand,
-          email,
-          textForEmail,
-          block.rowIndex || '?',
-          block.status || '',
-          block.locked || '',
-          block.tokenPrefix || ''
-        );
-        try {
-          logEvent_(traceId, brand, email, 'INVITE_BLOCKED', {
-            rowIndex: block.rowIndex || null,
-            status: block.status || null,
-            locked: block.locked || null,
-            tokenPrefix: block.tokenPrefix || null
-          });
-        } catch (e) {}
-        return { ok: false, code: 'INVITE_BLOCKED', reason: 'USED_OR_LOCKED' };
-      }
-    }
-  } catch (guardErr) {
-    Logger.log('[INVITE_BLOCK][ERROR] %s', String(guardErr));
-    // Fail-open for safety: do not block issuance if guard itself errors.
-  }
-
   // Expire any pending OTPs for this email/brand
-  expirePendingOtps_(email, brand, sheet);
+  expirePendingOtps_(email, brand);
   
   // Generate new OTP
   var otp = generateOtp_();

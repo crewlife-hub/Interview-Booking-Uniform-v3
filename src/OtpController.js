@@ -62,6 +62,56 @@ function serveOtpRequestPage_(params, traceId) {
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
 
+function getInviteBlockedMessage_() {
+  return 'This invite link has already been used. Please request a new invite.';
+}
+
+/**
+ * Issuance guard for OTP sends only (UI "Send OTP" flows).
+ * Searches TOKENS for matching Brand + Text For Email + (Email OR Email Hash)
+ * and blocks issuance if Status in {USED, LOCKED} OR Locked == LOCKED.
+ * Header-based lookup is mandatory; AB fallback is handled inside InviteGuard.
+ */
+function checkInviteReuseGuard_(brand, email, textForEmail, traceId) {
+  var emailHash = '';
+  try {
+    if (typeof computeEmailHashHex_ === 'function') {
+      emailHash = computeEmailHashHex_(email);
+    }
+  } catch (e) {}
+
+  Logger.log('[GUARD_KEY] traceId=%s brand=%s emailHash=%s textForEmail=%s', traceId, brand, emailHash, textForEmail);
+  var key = String(brand || '').toUpperCase().trim() + '|' + (emailHash || String(email || '').toLowerCase().trim()) + '|' + String(textForEmail || '').trim();
+
+  var block;
+  try {
+    block = (typeof findBlockingInviteInTokens_ === 'function')
+      ? findBlockingInviteInTokens_({ brand: brand, email: email, textForEmail: textForEmail })
+      : null;
+  } catch (guardErr) {
+    Logger.log('[INVITE_BLOCK][GUARD_ERROR] traceId=%s error=%s', traceId, String(guardErr));
+    return { blocked: false, key: key, emailHash: emailHash };
+  }
+
+  if (block && block.blocked) {
+    Logger.log('[GUARD_MATCH] traceId=%s matchedRow=%s status=%s locked=%s', traceId, block.rowIndex || '?', block.status || '', block.locked || '');
+    Logger.log('[INVITE_BLOCK] traceId=%s matchedRow=%s status=%s locked=%s key=%s', traceId, block.rowIndex || '?', block.status || '', block.locked || '', key);
+    try {
+      logEvent_(traceId, brand, email, 'INVITE_BLOCKED', {
+        key: key,
+        matchedRow: block.rowIndex || null,
+        status: block.status || null,
+        locked: block.locked || null,
+        tokenPrefix: block.tokenPrefix || null,
+        reason: 'USED_OR_LOCKED'
+      });
+    } catch (e) {}
+    return { blocked: true, key: key, emailHash: emailHash, match: block };
+  }
+
+  return { blocked: false, key: key, emailHash: emailHash };
+}
+
 /**
  * Handle OTP request form submission (POST)
  * @param {Object} params - Form parameters
@@ -94,6 +144,12 @@ function handleOtpRequest_(params, traceId) {
     logEvent_(traceId, brand, email, 'OTP_REQUEST_NOT_FOUND', {});
     return { ok: false, error: 'Candidate not found in system' };
   }
+
+  // Issuance guard: block if a USED/LOCKED invite already exists for this key.
+  var guard = checkInviteReuseGuard_(brand, email, textForEmail, traceId);
+  if (guard.blocked) {
+    return { ok: false, code: 'INVITE_BLOCKED', error: getInviteBlockedMessage_() };
+  }
   
   // Create OTP
   var otpResult = createOtp_({
@@ -105,13 +161,6 @@ function handleOtpRequest_(params, traceId) {
   });
   
   if (!otpResult.ok) {
-    if (otpResult.code === 'INVITE_BLOCKED') {
-      return {
-        ok: false,
-        code: 'INVITE_BLOCKED',
-        error: 'This invite has already been used. Please request a new invite from Crew Life at Sea.'
-      };
-    }
     return { ok: false, error: otpResult.error };
   }
   
@@ -234,11 +283,13 @@ function startOtpByBrandCl_(params, traceId) {
   // if (!candidate.ok || !candidate.found) return { ok: false, error: 'Candidate not found' };
 
   // Create OTP
+  var guard = checkInviteReuseGuard_(brand, email, textForEmail, traceId);
+  if (guard.blocked) {
+    return { ok: false, code: 'INVITE_BLOCKED', error: getInviteBlockedMessage_() };
+  }
+
   var otpResult = createOtp_({ email: email, brand: brand, textForEmail: textForEmail, traceId: traceId });
   if (!otpResult.ok) {
-    if (otpResult.code === 'INVITE_BLOCKED') {
-      return { ok: false, code: 'INVITE_BLOCKED', error: 'This invite has already been used. Please request a new invite from Crew Life at Sea.' };
-    }
     return { ok: false, error: otpResult.error };
   }
 
@@ -304,6 +355,12 @@ function startOtpByTextForEmail(params, traceId) {
     var candidate = searchResult.candidate || {};
     candidate['Position Link'] = searchResult.interviewLink || '';
 
+    // 2.5 Issuance guard: block if a USED/LOCKED invite already exists for this key.
+    var guard = checkInviteReuseGuard_(brand, email, textForEmail, traceId);
+    if (guard.blocked) {
+      return { ok: false, code: 'INVITE_BLOCKED', error: getInviteBlockedMessage_() };
+    }
+
     // 3. Create OTP (single call — writes token row with Position Link)
     var otpResult = createOtp_({
       email:        email,
@@ -313,9 +370,6 @@ function startOtpByTextForEmail(params, traceId) {
       candidate:    candidate
     });
     if (!otpResult.ok) {
-      if (otpResult.code === 'INVITE_BLOCKED') {
-        return { ok: false, code: 'INVITE_BLOCKED', error: 'This invite has already been used. Please request a new invite from Crew Life at Sea.' };
-      }
       return { ok: false, error: otpResult.error || 'OTP generation failed.' };
     }
 
