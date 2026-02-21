@@ -217,15 +217,71 @@ function runSidewaysForBrand(brand, opts) {
     return { ok: false, error: 'brand is required (e.g. ROYAL)' };
   }
 
-  var workerOpts = { brand: b };
-  if (opts.limit !== undefined && opts.limit !== null && opts.limit !== '') {
-    workerOpts.limit = Number(opts.limit);
+  var runStart = Date.now();
+  var limit = (opts.limit === undefined || opts.limit === null || opts.limit === '')
+    ? SIDEWAYS_MAX_MATCHES
+    : Number(opts.limit);
+  if (!isFinite(limit) || limit <= 0) limit = SIDEWAYS_MAX_MATCHES;
+
+  var cfg = getConfig_();
+  var apiToken = cfg.SMARTSHEET_API_TOKEN;
+  if (!apiToken) {
+    Logger.log('ERROR: SMARTSHEET API token not configured');
+    return { ok: false, error: 'SMARTSHEET API token not configured' };
   }
 
-  Logger.log('runSidewaysForBrand: brand=%s limit=%s', b, workerOpts.limit === undefined ? '(none)' : workerOpts.limit);
-  var res = processSidewaysInvites_(workerOpts);
-  Logger.log('runSidewaysForBrand: result=%s', JSON.stringify(res));
-  return res;
+  var traceId = generateTraceId_();
+  var sheetIds = getSmartsheetIdsForBrand_(b) || [];
+  if (!sheetIds.length) {
+    Logger.log('runSidewaysForBrand: no sheets found for brand=%s', b);
+    return { ok: true, summary: { brand: b, totalRows: 0, sidewaysFound: 0, emailsSent: 0, updatesWritten: 0, failures: 0 } };
+  }
+
+  var summary = {
+    brand: b,
+    totalRows: 0,
+    sidewaysFound: 0,
+    emailsSent: 0,
+    updatesWritten: 0,
+    failures: 0,
+    processed: 0,
+    skipped: 0,
+    errors: []
+  };
+
+  Logger.log('runSidewaysForBrand: brand=%s sheets=%s limit=%s', b, sheetIds.length, limit === SIDEWAYS_MAX_MATCHES ? '(default)' : limit);
+
+  for (var i = 0; i < sheetIds.length; i++) {
+    if (summary.processed >= limit) break;
+    if (Date.now() - runStart > SIDEWAYS_MAX_MS_PER_RUN) break;
+    var remaining = limit - summary.processed;
+    var res = processSidewaysForSheet_(sheetIds[i], b, {
+      apiToken: apiToken,
+      traceId: traceId,
+      limit: remaining,
+      runStart: runStart
+    });
+
+    if (!res.ok) {
+      summary.failures += 1;
+      summary.errors.push({ sheetId: sheetIds[i], error: res.error || 'Sheet processing failed' });
+      continue;
+    }
+
+    summary.totalRows += (res.totalRows || 0);
+    summary.sidewaysFound += (res.sidewaysFound || 0);
+    summary.emailsSent += (res.emailsSent || 0);
+    summary.updatesWritten += (res.updatesWritten || 0);
+    summary.failures += (res.failures || 0);
+    summary.processed += (res.processed || 0);
+    summary.skipped += (res.skipped || 0);
+    if (res.errors && res.errors.length) {
+      for (var e = 0; e < res.errors.length; e++) summary.errors.push(res.errors[e]);
+    }
+  }
+
+  Logger.log('runSidewaysForBrand: result=%s', JSON.stringify(summary));
+  return { ok: true, summary: summary };
 }
 
 // Convenience helpers (always LIVE)

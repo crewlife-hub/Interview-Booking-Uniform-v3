@@ -35,6 +35,16 @@ function hashEmail_(email) {
   return Utilities.base64Encode(hash);
 }
 
+function findHeaderIndex_(headers, headerName) {
+  if (!headers || !headers.length) return -1;
+  var needle = String(headerName || '').trim().toLowerCase();
+  if (!needle) return -1;
+  for (var i = 0; i < headers.length; i++) {
+    if (String(headers[i]).trim().toLowerCase() === needle) return i;
+  }
+  return -1;
+}
+
 /**
  * Issue a new token for a candidate
  * @param {Object} params - Token parameters
@@ -207,15 +217,6 @@ function confirmTokenAndMarkUsed_(token, traceId) {
   // Mark as USED
   sheet.getRange(validation.rowIndex, statusIdx + 1).setValue(TOKEN_STATUS.USED);
   sheet.getRange(validation.rowIndex, usedAtIdx + 1).setValue(new Date());
-  // Mark as LOCKED via HeaderFixer lockRow_ (finds Locked column dynamically)
-  try {
-    lockRow_(sheet, validation.rowIndex);
-  } catch (lockErr) {
-    Logger.log('[INVITE_LOCK_ERROR] lockRow_ failed, falling back to col 28: %s', lockErr);
-    sheet.getRange(validation.rowIndex, 28).setValue('LOCKED');
-  }
-  SpreadsheetApp.flush();
-  Logger.log('[INVITE_LOCK] row=%s LOCKED — flushed', validation.rowIndex);
   
   logEvent_(traceId, validation.brand, '', 'TOKEN_USED', {
     token: token.substring(0, 8) + '...',
@@ -223,6 +224,9 @@ function confirmTokenAndMarkUsed_(token, traceId) {
     redirectUrl: maskUrl_(validation.bookingUrl)
   });
   
+  // Apply invite lock to all matching rows
+  applyInviteLock_(validation.brand, validation.emailHash, validation.textForEmail);
+
   return {
     ok: true,
     redirectUrl: validation.bookingUrl,
@@ -230,6 +234,114 @@ function confirmTokenAndMarkUsed_(token, traceId) {
     clCode: validation.clCode,
     textForEmail: validation.textForEmail
   };
+}
+
+/**
+ * Check if an invitation is locked (booking already completed).
+ * Reads the TOKENS sheet live on every call (no caching).
+ * Admin can type "UNLOCK" in the Locked column to allow reuse.
+ * @param {string} brand - Brand code
+ * @param {string|string[]} emailHash - Email hash (or array of hashes) to match
+ * @param {string} textForEmail - Text For Email
+ * @returns {boolean} True if locked
+ */
+function isInviteLocked_(brand, emailHash, textForEmail) {
+  var hashes = Array.isArray(emailHash) ? emailHash : [emailHash];
+  var ss = getConfigSheet_();
+  var sheet = ss.getSheetByName('TOKENS');
+  if (!sheet) return false;
+
+  var lastRow = sheet.getLastRow();
+  var lastCol = sheet.getLastColumn();
+  if (lastRow < 2 || lastCol < 1) return false;
+
+  // Read headers from full width so Locked column is always included
+  var headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+  var emailHashIdx = findHeaderIndex_(headers, 'Email Hash');
+  var textForEmailIdx = findHeaderIndex_(headers, 'Text For Email');
+  var brandIdx = findHeaderIndex_(headers, 'Brand');
+  var lockedIdx = findHeaderIndex_(headers, 'Locked');
+
+  if (lockedIdx === -1) return false; // Locked column not created yet — not locked
+  if (emailHashIdx === -1 || textForEmailIdx === -1 || brandIdx === -1) return false;
+
+  var data = sheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
+  for (var i = 0; i < data.length; i++) {
+    var rowHash = String(data[i][emailHashIdx]);
+    var hashMatch = false;
+    for (var h = 0; h < hashes.length; h++) {
+      if (rowHash === String(hashes[h])) { hashMatch = true; break; }
+    }
+    if (hashMatch &&
+        String(data[i][textForEmailIdx]).trim() === String(textForEmail).trim() &&
+        String(data[i][brandIdx]).toUpperCase() === String(brand).toUpperCase() &&
+        String(data[i][lockedIdx]).toUpperCase() === 'LOCKED') {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Apply invite lock to all matching rows after a token reaches USED.
+ * Writes "LOCKED" to the Locked column for every row matching
+ * the given emailHash + textForEmail + brand.
+ * @param {string} brand - Brand code
+ * @param {string} emailHash - Email hash to match
+ * @param {string} textForEmail - Text For Email
+ */
+function applyInviteLock_(brand, emailHash, textForEmail) {
+  try {
+    var ss = getConfigSheet_();
+    var sheet = ss.getSheetByName('TOKENS');
+    if (!sheet) { Logger.log('[INVITE_LOCK] TOKENS sheet not found'); return; }
+
+    var lastRow = sheet.getLastRow();
+    var lastCol = sheet.getLastColumn();
+    if (lastRow < 2 || lastCol < 1) { Logger.log('[INVITE_LOCK] Sheet empty'); return; }
+
+    // Read headers from full width (getDataRange may stop short of Locked column)
+    var headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+    var emailHashIdx = findHeaderIndex_(headers, 'Email Hash');
+    var textForEmailIdx = findHeaderIndex_(headers, 'Text For Email');
+    var brandIdx = findHeaderIndex_(headers, 'Brand');
+    var lockedIdx = findHeaderIndex_(headers, 'Locked');
+
+    if (emailHashIdx === -1 || textForEmailIdx === -1 || brandIdx === -1) {
+      Logger.log('[INVITE_LOCK] Missing required columns (Email Hash/Text For Email/Brand). Cannot apply lock.');
+      return;
+    }
+
+    // If Locked column doesn't exist yet, create it
+    if (lockedIdx === -1) {
+      lockedIdx = lastCol; // 0-based index = lastCol means column lastCol+1
+      sheet.getRange(1, lastCol + 1).setValue('Locked');
+      lastCol = lastCol + 1;
+      Logger.log('[INVITE_LOCK] Created Locked header at column %s', lastCol);
+    }
+
+    Logger.log('[INVITE_LOCK] brand=%s hash=%s tfe=%s lockedCol=%s rows=%s',
+      brand, String(emailHash).substring(0, 12) + '...', String(textForEmail).substring(0, 30), lockedIdx + 1, lastRow - 1);
+
+    // Read data from all rows and relevant columns
+    var data = sheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
+    var lockCount = 0;
+    for (var i = 0; i < data.length; i++) {
+      if (String(data[i][emailHashIdx]) === String(emailHash) &&
+          String(data[i][textForEmailIdx]).trim() === String(textForEmail).trim() &&
+          String(data[i][brandIdx]).toUpperCase() === String(brand).toUpperCase()) {
+        var current = String(data[i][lockedIdx] || '').toUpperCase().trim();
+        if (current !== 'LOCKED') {
+          sheet.getRange(i + 2, lockedIdx + 1).setValue('LOCKED');
+          lockCount++;
+        }
+      }
+    }
+
+    Logger.log('[INVITE_LOCK] Applied LOCKED to %s rows for brand=%s', lockCount, brand);
+  } catch (e) {
+    Logger.log('[INVITE_LOCK] ERROR: %s', String(e));
+  }
 }
 
 /**
@@ -396,21 +508,37 @@ function consumeTokenForRedirect_(token, traceId) {
       return { ok: false, error: 'System not initialized', code: 'NO_TOKEN_SHEET' };
     }
 
-    var data = sheet.getDataRange().getValues();
-    if (data.length < 2) {
+    // Use explicit full-width header + data ranges (getDataRange can stop short)
+    var lastRow = sheet.getLastRow();
+    var lastCol = sheet.getLastColumn();
+    if (lastRow < 2) {
       return { ok: false, error: 'Token not found', code: 'NOT_FOUND' };
     }
-
-    var headers = data[0];
+    var headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
     var idx = {};
     for (var h = 0; h < headers.length; h++) {
-      idx[headers[h]] = h;
+      idx[String(headers[h]).trim()] = h;
     }
+
+    var tokenIdx = findHeaderIndex_(headers, 'Token');
+    var statusIdx = findHeaderIndex_(headers, 'Status');
+    var expiryIdx = findHeaderIndex_(headers, 'Expiry');
+    var brandIdx = findHeaderIndex_(headers, 'Brand');
+    var textForEmailIdx = findHeaderIndex_(headers, 'Text For Email');
+    var emailHashIdx = findHeaderIndex_(headers, 'Email Hash');
+    var usedAtIdx = findHeaderIndex_(headers, 'Used At');
+    var positionLinkIdx = findHeaderIndex_(headers, 'Position Link');
+
+    if (tokenIdx === -1 || statusIdx === -1 || expiryIdx === -1 || brandIdx === -1 || textForEmailIdx === -1) {
+      return { ok: false, error: 'Token sheet headers are misconfigured', code: 'NO_TOKEN_SHEET' };
+    }
+
+    var data = sheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
 
     // Find token row
     var targetRow = -1;
-    for (var i = 1; i < data.length; i++) {
-      if (String(data[i][idx['Token']]) === token) {
+    for (var i = 0; i < data.length; i++) {
+      if (String(data[i][tokenIdx]) === token) {
         targetRow = i;
         break;
       }
@@ -421,9 +549,9 @@ function consumeTokenForRedirect_(token, traceId) {
     }
 
     var row = data[targetRow];
-    var status = String(row[idx['Status']] || '');
-    var expiry = new Date(row[idx['Expiry']]);
-    var sheetRow = targetRow + 1;
+    var status = String(row[statusIdx] || '');
+    var expiry = new Date(row[expiryIdx]);
+    var sheetRow = targetRow + 2;
 
     // Already used — hard block
     if (status === 'USED') {
@@ -444,14 +572,13 @@ function consumeTokenForRedirect_(token, traceId) {
     }
 
     // Extract metadata for logging
-    var brand = String(row[idx['Brand']] || '');
-    var textForEmail = String(row[idx['Text For Email']] || '');
+    var brand = String(row[brandIdx] || '');
+    var textForEmail = String(row[textForEmailIdx] || '');
     var clCodeMatch = textForEmail.match(/CL\d+/i);
     var clCode = clCodeMatch ? clCodeMatch[0].toUpperCase() : 'UNKNOWN';
 
     // Get booking URL: prefer Position Link (per-candidate), fall back to CL_CODES sheet
-    var posLinkIdx = idx['Position Link'];
-    var rawBookingUrl = (posLinkIdx !== undefined) ? String(row[posLinkIdx] || '') : '';
+    var rawBookingUrl = (positionLinkIdx !== -1) ? String(row[positionLinkIdx] || '') : '';
     var urlSource = 'Position Link';
 
     // Fallback: if Position Link empty, try CL_CODES sheet Booking Schedule URL
@@ -552,20 +679,23 @@ function consumeTokenForRedirect_(token, traceId) {
       Logger.log('[REDIRECT_WARN] URL may still trigger Google login - check calendar settings');
     }
 
-    // === ATOMIC: Mark USED + set Used At + LOCKED BEFORE returning booking URL ===
-    sheet.getRange(sheetRow, idx['Status'] + 1).setValue('USED');
-    if (idx['Used At'] !== undefined) {
-      sheet.getRange(sheetRow, idx['Used At'] + 1).setValue(new Date());
+    // === ATOMIC: Mark USED + set Used At BEFORE returning booking URL ===
+    sheet.getRange(sheetRow, statusIdx + 1).setValue('USED');
+    if (usedAtIdx !== -1) {
+      sheet.getRange(sheetRow, usedAtIdx + 1).setValue(new Date());
     }
-    // Mark as LOCKED via HeaderFixer lockRow_ (finds Locked column dynamically)
-    try {
-      lockRow_(sheet, sheetRow);
-    } catch (lockErr) {
-      Logger.log('[INVITE_LOCK_ERROR] lockRow_ failed, falling back to col 28: %s', lockErr);
-      sheet.getRange(sheetRow, 28).setValue('LOCKED');
+
+    // Apply invite lock (prevents issuing new OTPs for same invite)
+    if (emailHashIdx !== -1) {
+      var emailHash = String(row[emailHashIdx] || '').trim();
+      if (emailHash) {
+        applyInviteLock_(brand, emailHash, textForEmail);
+      } else {
+        Logger.log('[INVITE_LOCK] Missing Email Hash on token row; cannot lock. token=%s', token.substring(0, 8) + '...');
+      }
+    } else {
+      Logger.log('[INVITE_LOCK] Email Hash column not found; cannot lock.');
     }
-    SpreadsheetApp.flush();   // force all writes to commit before lock releases
-    Logger.log('[INVITE_LOCK] row=%s LOCKED — flushed', sheetRow);
 
     logEvent_(traceId, brand, '', 'TOKEN_CONSUMED', {
       token: token.substring(0, 8) + '...',
