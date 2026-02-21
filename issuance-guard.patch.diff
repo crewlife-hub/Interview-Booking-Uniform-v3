@@ -1,0 +1,319 @@
+﻿diff --git a/src/OtpController.js b/src/OtpController.js
+index c7641dc..8fdad2f 100644
+--- a/src/OtpController.js
++++ b/src/OtpController.js
+@@ -103,10 +103,17 @@ function handleOtpRequest_(params, traceId) {
+     traceId: traceId,
+     candidate: candidate.candidate
+   });
+   
+   if (!otpResult.ok) {
++    if (otpResult.code === 'INVITE_BLOCKED') {
++      return {
++        ok: false,
++        code: 'INVITE_BLOCKED',
++        error: 'This invite has already been used. Please request a new invite from Crew Life at Sea.'
++      };
++    }
+     return { ok: false, error: otpResult.error };
+   }
+   
+   // Send OTP email with token for deterministic verification
+   var emailResult = sendOtpEmail_({
+@@ -226,11 +233,16 @@ function startOtpByBrandCl_(params, traceId) {
+   // var candidate = searchCandidateInSmartsheet_(brand, email, textForEmail);
+   // if (!candidate.ok || !candidate.found) return { ok: false, error: 'Candidate not found' };
+ 
+   // Create OTP
+   var otpResult = createOtp_({ email: email, brand: brand, textForEmail: textForEmail, traceId: traceId });
+-  if (!otpResult.ok) return { ok: false, error: otpResult.error };
++  if (!otpResult.ok) {
++    if (otpResult.code === 'INVITE_BLOCKED') {
++      return { ok: false, code: 'INVITE_BLOCKED', error: 'This invite has already been used. Please request a new invite from Crew Life at Sea.' };
++    }
++    return { ok: false, error: otpResult.error };
++  }
+ 
+   // Send OTP email with token
+   var emailResult = sendOtpEmail_({ email: email, otp: otpResult.otp, brand: brand, textForEmail: textForEmail, token: otpResult.token, expiryMinutes: otpResult.expiryMinutes, traceId: traceId });
+   if (!emailResult.ok) return { ok: false, error: emailResult.error };
+ 
+@@ -299,10 +311,13 @@ function startOtpByTextForEmail(params, traceId) {
+       textForEmail: textForEmail,
+       traceId:      traceId,
+       candidate:    candidate
+     });
+     if (!otpResult.ok) {
++      if (otpResult.code === 'INVITE_BLOCKED') {
++        return { ok: false, code: 'INVITE_BLOCKED', error: 'This invite has already been used. Please request a new invite from Crew Life at Sea.' };
++      }
+       return { ok: false, error: otpResult.error || 'OTP generation failed.' };
+     }
+ 
+     // 4. Send OTP email (exactly once)
+     var emailResult = sendOtpEmail_({
+diff --git a/src/OtpService.js b/src/OtpService.js
+index 42b2d94..7b7123c 100644
+--- a/src/OtpService.js
++++ b/src/OtpService.js
+@@ -43,26 +43,67 @@ function createOtp_(params) {
+   
+   // Rate limiting removed: allow immediate OTP creation (for testing/development)
+   // If you need to re-enable rate limiting, set a script property 'ENABLE_OTP_RATE_LIMIT' = 'true'
+   // and implement the check accordingly.
+   
++  // Resolve TOKENS sheet early (guard must run BEFORE any writes)
++  var ss = getConfigSheet_();
++  var sheet = ss.getSheetByName('TOKENS');
++  if (!sheet) {
++    ensureConfigSheetTabs_();
++    sheet = ss.getSheetByName('TOKENS');
++  }
++  if (!sheet) {
++    return { ok: false, error: 'System not configured' };
++  }
++
++  // Global issuance guard: block if an invite has already been USED or LOCKED
++  // for the same (brand + email/emailHash + textForEmail).
++  try {
++    if (typeof findBlockingInviteInTokens_ === 'function') {
++      var block = findBlockingInviteInTokens_({
++        sheet: sheet,
++        brand: brand,
++        email: email,
++        textForEmail: textForEmail
++      });
++      if (block && block.blocked) {
++        Logger.log('[INVITE_BLOCK] brand=%s email=%s text=%s row=%s status=%s locked=%s token=%s',
++          brand,
++          email,
++          textForEmail,
++          block.rowIndex || '?',
++          block.status || '',
++          block.locked || '',
++          block.tokenPrefix || ''
++        );
++        try {
++          logEvent_(traceId, brand, email, 'INVITE_BLOCKED', {
++            rowIndex: block.rowIndex || null,
++            status: block.status || null,
++            locked: block.locked || null,
++            tokenPrefix: block.tokenPrefix || null
++          });
++        } catch (e) {}
++        return { ok: false, code: 'INVITE_BLOCKED', reason: 'USED_OR_LOCKED' };
++      }
++    }
++  } catch (guardErr) {
++    Logger.log('[INVITE_BLOCK][ERROR] %s', String(guardErr));
++    // Fail-open for safety: do not block issuance if guard itself errors.
++  }
++
+   // Expire any pending OTPs for this email/brand
+-  expirePendingOtps_(email, brand);
++  expirePendingOtps_(email, brand, sheet);
+   
+   // Generate new OTP
+   var otp = generateOtp_();
+   var expiryMinutes = getOtpExpiryMinutes_();
+   var expiryTime = new Date(Date.now() + expiryMinutes * 60 * 1000);
+   var token = Utilities.getUuid();
+   
+   // Store in TOKENS sheet
+-  var ss = getConfigSheet_();
+-  var sheet = ss.getSheetByName('TOKENS');
+-  if (!sheet) {
+-    ensureConfigSheetTabs_();
+-    sheet = ss.getSheetByName('TOKENS');
+-  }
+   
+   var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+   var tokenIdx = headers.indexOf('Token');
+   var emailIdx = headers.indexOf('Email');
+   var emailHashIdx = headers.indexOf('Email Hash');
+@@ -339,12 +380,15 @@ function countRecentOtps_(email, brand, minutes) {
+  * Expire pending OTPs for an email/brand
+  * @param {string} email - Email
+  * @param {string} brand - Brand
+  */
+ function expirePendingOtps_(email, brand) {
+-  var ss = getConfigSheet_();
+-  var sheet = ss.getSheetByName('TOKENS');
++  var sheet = arguments.length >= 3 ? arguments[2] : null;
++  if (!sheet) {
++    var ss = getConfigSheet_();
++    sheet = ss.getSheetByName('TOKENS');
++  }
+   if (!sheet) return;
+   
+   var data = sheet.getDataRange().getValues();
+   var headers = data[0];
+   var emailIdx = headers.indexOf('Email');
+diff --git a/src/SmartsheetWorker.js b/src/SmartsheetWorker.js
+index c14652f..0d36332 100644
+--- a/src/SmartsheetWorker.js
++++ b/src/SmartsheetWorker.js
+@@ -285,10 +285,21 @@ function processSidewaysInvites_(opts) {
+             email: candidateEmailNorm,
+             brand: brand,
+             textForEmail: textForEmail,
+             traceId: traceId
+           });
++          if (!otpCreated.ok) {
++            if (otpCreated.code === 'INVITE_BLOCKED') {
++              Logger.log('[SIDEWAYS_SKIP_INVITE_BLOCKED] rowId=%s brand=%s email=%s', row.id, brand, candidateEmailNorm);
++              logEvent_(traceId, brand, candidateEmailNorm, 'SIDEWAYS_INVITE_BLOCKED', {
++                rowId: row.id,
++                reason: otpCreated.reason || 'USED_OR_LOCKED'
++              });
++              results.skipped++;
++              continue;
++            }
++          }
+           if (!otpCreated.ok || !otpCreated.token) {
+             logEvent_(traceId, brand, candidateEmailNorm, 'SIDEWAYS_TOKEN_CREATE_FAILED', { rowId: row.id, error: otpCreated.error || 'unknown' });
+             results.errors.push({ rowId: row.id, error: 'Token creation failed: ' + (otpCreated.error || 'unknown') });
+             results.skipped++;
+             continue;
+diff --git a/src/InviteGuard.js b/src/InviteGuard.js
+new file mode 100644
+index 0000000..14f35a3
+--- /dev/null
++++ b/src/InviteGuard.js
+@@ -0,0 +1,136 @@
++/**
++ * InviteGuard.gs
++ * Prevents re-issuing invites (new token rows / emails) when a candidate has
++ * already USED or LOCKED an invite for the same brand + email + textForEmail.
++ */
++
++function normalizeEmailKey_(email) {
++  return String(email || '').toLowerCase().trim();
++}
++
++function normalizeBrandKey_(brand) {
++  return String(brand || '').toUpperCase().trim();
++}
++
++function normalizeTextKey_(textForEmail) {
++  return String(textForEmail || '').toLowerCase().trim();
++}
++
++function computeEmailHashHex_(email) {
++  var e = normalizeEmailKey_(email);
++  if (!e) return '';
++  return Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, e)
++    .map(function(b) { return ('0' + (b & 0xFF).toString(16)).slice(-2); })
++    .join('');
++}
++
++function computeEmailHashBase64_(email) {
++  var e = normalizeEmailKey_(email);
++  if (!e) return '';
++  var hash = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, e);
++  return Utilities.base64Encode(hash);
++}
++
++function getEmailHashVariants_(email) {
++  return {
++    hex: computeEmailHashHex_(email),
++    base64: computeEmailHashBase64_(email)
++  };
++}
++
++/**
++ * Single-call in-memory scan to find a blocking prior invite.
++ * Matches on Brand + Text For Email + (Email OR Email Hash variants).
++ * Blocks if Status in {USED, LOCKED} OR Locked == LOCKED.
++ * Does NOT block on SUPERSEDED rows unless Locked == LOCKED.
++ *
++ * @param {{sheet?:GoogleAppsScript.Spreadsheet.Sheet, brand:string, email:string, textForEmail:string}} params
++ * @returns {{blocked:boolean, rowIndex?:number, status?:string, locked?:string}}
++ */
++function findBlockingInviteInTokens_(params) {
++  var sheet = params.sheet;
++  if (!sheet) {
++    var ss = getConfigSheet_();
++    sheet = ss.getSheetByName('TOKENS');
++  }
++  if (!sheet) return { blocked: false };
++
++  var brandKey = normalizeBrandKey_(params.brand);
++  var emailKey = normalizeEmailKey_(params.email);
++  var textKey = normalizeTextKey_(params.textForEmail);
++  if (!brandKey || !emailKey || !textKey) return { blocked: false };
++
++  var lastRow = sheet.getLastRow();
++  var lastCol = sheet.getLastColumn();
++  if (lastRow < 2) return { blocked: false };
++
++  var values = sheet.getRange(1, 1, lastRow, lastCol).getValues();
++  var headers = values[0].map(function(h) { return String(h || '').trim(); });
++
++  function idxOf(name) {
++    return headers.indexOf(name);
++  }
++
++  var idxBrand = idxOf('Brand');
++  var idxEmail = idxOf('Email');
++  var idxEmailHash = idxOf('Email Hash');
++  var idxText = idxOf('Text For Email');
++  var idxStatus = idxOf('Status');
++  var idxLocked = idxOf('Locked');
++  var idxToken = idxOf('Token');
++
++  // LOCKED marker fallback:
++  // - Prefer an explicit 'Locked' header if present
++  // - Otherwise, fall back to column AB (28) if the sheet has that many columns
++  //   (TokenService writes LOCKED to AB regardless of header schema)
++  var AB_LOCKED_ZERO_BASED = 27;
++  if (idxLocked === -1 && lastCol >= 28) {
++    idxLocked = AB_LOCKED_ZERO_BASED;
++  }
++
++  if (idxBrand === -1 || idxText === -1 || idxStatus === -1) {
++    return { blocked: false };
++  }
++
++  var emailHashes = getEmailHashVariants_(emailKey);
++
++  // Scan newest -> oldest to find the latest relevant row quickly.
++  for (var r = values.length - 1; r >= 1; r--) {
++    var row = values[r];
++
++    var rowBrand = normalizeBrandKey_(row[idxBrand]);
++    if (rowBrand !== brandKey) continue;
++
++    var rowText = normalizeTextKey_(row[idxText]);
++    if (rowText !== textKey) continue;
++
++    var emailMatch = false;
++    if (idxEmail !== -1) {
++      var rowEmail = normalizeEmailKey_(row[idxEmail]);
++      if (rowEmail && rowEmail === emailKey) emailMatch = true;
++    }
++    if (!emailMatch && idxEmailHash !== -1) {
++      var rowHash = String(row[idxEmailHash] || '').trim();
++      if (rowHash && (rowHash === emailHashes.hex || rowHash === emailHashes.base64)) {
++        emailMatch = true;
++      }
++    }
++    if (!emailMatch) continue;
++
++    var status = String(row[idxStatus] || '').trim().toUpperCase();
++    var locked = idxLocked === -1 ? '' : String(row[idxLocked] || '').trim().toUpperCase();
++
++    if (locked === 'LOCKED' || status === 'USED' || status === 'LOCKED') {
++      var tokenPrefix = '';
++      try {
++        if (idxToken !== -1) {
++          var tok = String(row[idxToken] || '');
++          if (tok) tokenPrefix = tok.substring(0, 8) + '...';
++        }
++      } catch (e) {}
++      return { blocked: true, rowIndex: r + 1, status: status, locked: locked, tokenPrefix: tokenPrefix };
++    }
++  }
++
++  return { blocked: false };
++}
