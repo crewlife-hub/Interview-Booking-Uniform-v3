@@ -21,11 +21,13 @@
     body::before {
       content: '';
       position: fixed;
-      inset: auto -120px -90px auto;
-      width: 480px;
-      height: 480px;
+      bottom: -60px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 620px;
+      height: 620px;
       background: url('https://i.imgur.com/LgfOne5.png') no-repeat center/contain;
-      opacity: 0.05;
+      opacity: 0.06;
       pointer-events: none;
       z-index: 0;
     }
@@ -44,6 +46,7 @@
       align-items: center;
       justify-content: space-between;
       gap: 14px;
+      /* relative for centered logo absolute positioning */
     }
 
     .brand-block {
@@ -57,7 +60,7 @@
       width: 42px;
       height: 42px;
       border-radius: 10px;
-      object-fit: cover;
+      object-fit: contain;
       background: rgba(255, 255, 255, 0.15);
       padding: 3px;
     }
@@ -70,6 +73,17 @@
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
+    }
+
+    .header-center-logo {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      transform: translate(-50%, -50%);
+      height: 32px;
+      pointer-events: none;
+      user-select: none;
+      opacity: 0.92;
     }
 
     .header-note {
@@ -254,9 +268,9 @@
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      width: 36px;
-      height: 36px;
-      border-radius: 10px;
+      width: 46px;
+      height: 46px;
+      border-radius: 12px;
       background: rgba(255, 255, 255, 0.78);
       border: 1px solid rgba(12, 59, 102, 0.14);
       transition: transform 0.15s ease, box-shadow 0.15s ease;
@@ -268,8 +282,8 @@
     }
 
     .social-link img {
-      width: 18px;
-      height: 18px;
+      width: 26px;
+      height: 26px;
       object-fit: contain;
       display: block;
     }
@@ -324,9 +338,10 @@
 <body>
   <div class="lux-header">
     <div class="brand-block">
-      <img class="brand-logo" src="https://i.imgur.com/LgfOne5.png" alt="Crew Life at Sea logo">
+      <img class="brand-logo" src="https://i.imgur.com/qhlTDAu.png" alt="Crew Life at Sea logo">
       <h1 class="brand-title">Interview Booking</h1>
     </div>
+    <img class="header-center-logo" src="https://i.imgur.com/SVFHcfI.png" alt="Crew Life at Sea">
     <div class="header-note">Secure one-time login code</div>
   </div>
 
