@@ -83,9 +83,9 @@ function checkInviteReuseGuard_(brand, email, textForEmail, traceId) {
   Logger.log('[GUARD_KEY] traceId=%s brand=%s emailHash=%s textForEmail=%s', traceId, brand, emailHash, textForEmail);
   var key = String(brand || '').toUpperCase().trim() + '|' + (emailHash || String(email || '').toLowerCase().trim()) + '|' + String(textForEmail || '').trim();
 
-  var block;
+  var decision;
   try {
-    block = (typeof findBlockingInviteInTokens_ === 'function')
+    decision = (typeof findBlockingInviteInTokens_ === 'function')
       ? findBlockingInviteInTokens_({ brand: brand, email: email, textForEmail: textForEmail })
       : null;
   } catch (guardErr) {
@@ -93,23 +93,39 @@ function checkInviteReuseGuard_(brand, email, textForEmail, traceId) {
     return { blocked: false, key: key, emailHash: emailHash };
   }
 
-  if (block && block.blocked) {
-    Logger.log('[GUARD_MATCH] traceId=%s matchedRow=%s status=%s locked=%s', traceId, block.rowIndex || '?', block.status || '', block.locked || '');
-    Logger.log('[INVITE_BLOCK] traceId=%s matchedRow=%s status=%s locked=%s key=%s', traceId, block.rowIndex || '?', block.status || '', block.locked || '', key);
+  if (decision && decision.found) {
+    Logger.log('[GUARD_MATCH] traceId=%s matchedRow=%s status=%s locked=%s', traceId, decision.rowIndex || '?', decision.status || '', decision.locked || '');
+  }
+
+  if (decision && decision.overrideUnlock) {
+    Logger.log('[INVITE_OVERRIDE_UNLOCK] key=%s latestRowId=%s latestLocked=%s latestStatus=%s', key, decision.rowIndex || '?', decision.locked || '', decision.status || '');
+    try {
+      logEvent_(traceId, brand, email, 'INVITE_OVERRIDE_UNLOCK', {
+        key: key,
+        latestRowId: decision.rowIndex || null,
+        latestLocked: decision.locked || null,
+        latestStatus: decision.status || null
+      });
+    } catch (e) {}
+    return { blocked: false, key: key, emailHash: emailHash, match: decision };
+  }
+
+  if (decision && decision.blocked) {
+    Logger.log('[INVITE_BLOCK] traceId=%s matchedRow=%s status=%s locked=%s key=%s', traceId, decision.rowIndex || '?', decision.status || '', decision.locked || '', key);
     try {
       logEvent_(traceId, brand, email, 'INVITE_BLOCKED', {
         key: key,
-        matchedRow: block.rowIndex || null,
-        status: block.status || null,
-        locked: block.locked || null,
-        tokenPrefix: block.tokenPrefix || null,
-        reason: 'USED_OR_LOCKED'
+        matchedRow: decision.rowIndex || null,
+        status: decision.status || null,
+        locked: decision.locked || null,
+        tokenPrefix: decision.tokenPrefix || null,
+        reason: decision.reason || 'BLOCKED'
       });
     } catch (e) {}
-    return { blocked: true, key: key, emailHash: emailHash, match: block };
+    return { blocked: true, key: key, emailHash: emailHash, match: decision };
   }
 
-  return { blocked: false, key: key, emailHash: emailHash };
+  return { blocked: false, key: key, emailHash: emailHash, match: decision || null };
 }
 
 /**
