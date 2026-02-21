@@ -5,19 +5,21 @@
  */
 
 var APP_VERSION = '1.0.0';
+var BUILD_ID = '20260124-canonical-fix';
 var CONFIG_SHEET_ID = '1qM3ZEdBsvbEofDH8DayRWcRa4bUcrKQIv8kzKSYZ1AM';
-// Default exec URL — replaceable via Script Properties `WEB_APP_EXEC_URL` or `DEPLOY_ID`
-var WEB_APP_EXEC_URL_DEFAULT = 'https://script.google.com/macros/s/AKfycbzL1GZHA4DoMNhDT5-6LuYlXw2YPyYZI444dJFOHvrUtPXZorO4P7Sx1i8-Qe1bKKmxPQ/exec';
-var WEB_APP_EXEC_URL_TARGET = 'https://script.google.com/macros/s/AKfycbx-IEEieMEvXPf0cXC_R_y6KKtWOMkA2nXJkU1mu8XlIMY7MnCn5eamrzjzvre0frZm0Q/exec';
 
 /**
- * CANONICAL web app URL used for ALL email CTAs.
- * This MUST be the token-gate entry point — never a calendar URL.
- * Email CTA helpers call this instead of getWebAppUrl_() to guarantee
- * the link is always the correct /exec endpoint regardless of script properties.
- * Deployment @104 - Feb 19 2026 - FINAL CTA FIX.
+ * CANONICAL exec URL - the ONLY URL that should ever be used for this deployment.
+ * Set via Script Properties WEB_APP_EXEC_URL for override, but defaults to this.
  */
-var CANONICAL_WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbx-IEEieMEvXPf0cXC_R_y6KKtWOMkA2nXJkU1mu8XlIMY7MnCn5eamrzjzvre0frZm0Q/exec';
+var CANONICAL_EXEC_URL = 'https://script.google.com/macros/s/AKfycbwvIDYbgnnDBQJK9FxJdAKq3AXJheYnYi3gcwYQSrp7XdvK9osed2iOo_TAWez_SfxD/exec';
+
+// Legacy aliases - all point to CANONICAL_EXEC_URL
+var WEB_APP_EXEC_URL_DEFAULT = CANONICAL_EXEC_URL;
+var WEB_APP_EXEC_URL_TARGET = CANONICAL_EXEC_URL;
+
+// Legacy alias - points to CANONICAL_EXEC_URL
+var CANONICAL_WEB_APP_URL = CANONICAL_EXEC_URL;
 
 /**
  * Return the web app base URL for email CTAs.
@@ -147,6 +149,18 @@ function SET_WEBAPP_EXEC_URL() {
 }
 
 /**
+ * One-time admin setup to pin the CANONICAL exec URL in Script Properties.
+ * Run manually from Apps Script editor: SET_CANONICAL_URL()
+ * @returns {string} The configured URL
+ */
+function SET_CANONICAL_URL() {
+  var props = PropertiesService.getScriptProperties();
+  props.setProperty('WEB_APP_EXEC_URL', CANONICAL_EXEC_URL);
+  Logger.log('WEB_APP_EXEC_URL set to canonical: ' + CANONICAL_EXEC_URL);
+  return CANONICAL_EXEC_URL;
+}
+
+/**
  * Admin fix helper to force WEB_APP_EXEC_URL and log the resolved final URL.
  * Run manually from Apps Script editor: FIX_SET_WEB_APP_EXEC_URL()
  * @returns {string} Final URL from getWebAppUrl_()
@@ -210,27 +224,31 @@ function getSmartsheetIdForBrand_(brand) {
 }
 
 /**
- * Get the deployed web app URL
+ * Get the deployed web app URL.
+ * Priority: 1) Script Property WEB_APP_EXEC_URL, 2) CANONICAL_EXEC_URL constant.
+ * This ensures all links always point to the correct deployment.
  * @returns {string} Web app URL
  */
 function getWebAppUrl_() {
-  var props = PropertiesService.getScriptProperties();
-  var configured = props.getProperty('WEB_APP_EXEC_URL') || '';
-  if (configured) return configured;
-  var deployId = props.getProperty('DEPLOY_ID') || '';
-  if (deployId) return 'https://script.google.com/macros/s/' + deployId + '/exec';
-
   try {
-    var url = ScriptApp.getService().getUrl();
-    if (!url) return '';
-    // If running in editor dev mode, convert to the stable exec URL when possible
-    if (url.indexOf('/dev') !== -1) {
-      return url.replace(/\/dev$/, '/exec');
+    var props = PropertiesService.getScriptProperties();
+    var configured = (props.getProperty('WEB_APP_EXEC_URL') || '').trim();
+    if (configured) {
+      Logger.log('[getWebAppUrl_] Using Script Property: ' + configured);
+      return configured;
     }
-    // Prefer an exec URL if already present
-    if (url.indexOf('/exec') !== -1) return url;
-    return url;
   } catch (e) {
-    return WEB_APP_EXEC_URL_DEFAULT;
+    Logger.log('[getWebAppUrl_] Error reading props: ' + e);
   }
+  Logger.log('[getWebAppUrl_] Using CANONICAL_EXEC_URL: ' + CANONICAL_EXEC_URL);
+  return CANONICAL_EXEC_URL;
+}
+
+/**
+ * Get the canonical exec base URL (guaranteed stable).
+ * Always returns CANONICAL_EXEC_URL - never derived, never changes.
+ * @returns {string} Canonical exec URL
+ */
+function getExecBaseUrl_() {
+  return CANONICAL_EXEC_URL;
 }

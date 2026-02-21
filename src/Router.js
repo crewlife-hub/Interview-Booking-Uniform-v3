@@ -5,52 +5,76 @@
  */
 
 /**
- * Handle GET requests
+ * Handle GET requests - BULLETPROOF: NEVER returns blank page.
  * @param {Object} e - Event object with parameters
  * @returns {HtmlOutput|TextOutput} Response
  */
 function doGet(e) {
-  var traceId = generateTraceId_();
+  var traceId = '';
+  var step = 'INIT';
+  var stepLog = [];
+  
+  function logStep(s, data) {
+    step = s;
+    stepLog.push({ step: s, ts: new Date().toISOString(), data: data || {} });
+  }
+  
   try {
+    logStep('GENERATE_TRACE_ID');
+    traceId = generateTraceId_();
+    
+    logStep('PARSE_PARAMS');
     var params = e && e.parameter ? e.parameter : {};
     var page = (params.page || '').toLowerCase();
     var brand = (params.brand || '').toUpperCase();
     var token = params.token || '';
+    logStep('PARAMS_PARSED', { page: page, brand: brand, hasToken: !!token });
+
+    // Route: Diagnostics via ?diag=1 (shortcut)
+    if (params.diag === '1') {
+      logStep('ROUTE_DIAG_SHORTCUT');
+      return serveDiagPage_(brand, traceId);
+    }
 
     // Route: No brand → Brand selector
     if (!brand && !page) {
+      logStep('ROUTE_BRAND_SELECTOR');
       return serveBrandSelector_();
     }
 
     // Route: Diagnostics (self-test)
     if (page === 'diag') {
+      logStep('ROUTE_DIAG_PAGE');
       return serveDiagPage_(brand, traceId);
     }
 
     // Route: Admin console (disabled) — redirect to start page
     if (page === 'admin') {
-      // Admin Console removed; show public start page instead
+      logStep('ROUTE_ADMIN_DISABLED');
       return serveBrandSelector_();
     }
 
     // Route: Admin data debug (returns JSON used to render admin UI)
     if (page === 'admindata') {
+      logStep('ROUTE_ADMIN_DATA');
       return serveAdminData_(brand, params, traceId);
     }
 
     // Route: OTP request page (from Smartsheet email signed link)
     if (page === 'otp') {
+      logStep('ROUTE_OTP_REQUEST');
       return serveOtpRequestPage_(params, traceId);
     }
 
     // Route: OTP verification page
     if (page === 'verify') {
+      logStep('ROUTE_OTP_VERIFY');
       return serveOtpVerifyPage_(params, traceId);
     }
 
     // Route: Secure booking access (confirm gate + one-time redirect)
     if (page === 'access') {
-      // confirm=1 consumes token and redirects; otherwise show gate page only.
+      logStep('ROUTE_ACCESS', { confirm: params.confirm });
       if (String(params.confirm || '') === '1') {
         return handleSecureAccessConfirm_(params, traceId);
       }
@@ -59,6 +83,7 @@ function doGet(e) {
 
     // Route: Token-only CTA (no page param) — treat as secure access
     if (token && !page) {
+      logStep('ROUTE_TOKEN_ACCESS', { tokenPrefix: token.substring(0, 8) });
       if (String(params.confirm || '') === '1') {
         return handleSecureAccessConfirm_(params, traceId);
       }
@@ -67,26 +92,98 @@ function doGet(e) {
 
     // Route: Booking confirmation page (legacy — neutered, use secure access flow)
     if (page === 'booking') {
+      logStep('ROUTE_BOOKING_DEPRECATED');
       return serveErrorPage_('Deprecated', 'This page is no longer available. Please use the secure access link from your email.', traceId);
     }
 
     // Route: Token verification (legacy candidate flow)
     if (token) {
+      logStep('ROUTE_CANDIDATE_CONFIRM');
       return serveCandidateConfirm_(brand, token, traceId);
     }
 
     // Route: Brand landing (shouldn't happen normally, redirect to admin)
     if (brand && isValidBrand_(brand)) {
+      logStep('ROUTE_ADMIN_CONSOLE');
       return serveAdminConsole_(brand, params, traceId);
     }
 
     // Fallback: Brand selector
+    logStep('ROUTE_FALLBACK');
     return serveBrandSelector_();
 
   } catch (err) {
-    logEvent_(traceId, '', '', 'ROUTER_ERROR', { error: String(err), stack: err.stack });
-    return serveErrorPage_('System Error', 'An unexpected error occurred. Please try again.', traceId);
+    // BULLETPROOF: Log error, email admin, and ALWAYS return styled error page
+    var errMsg = String(err);
+    var errStack = err.stack || '';
+    
+    try {
+      logEvent_(traceId || 'NO_TRACE', '', '', 'ROUTER_FATAL_ERROR', {
+        error: errMsg,
+        stack: errStack,
+        step: step,
+        stepLog: JSON.stringify(stepLog)
+      });
+    } catch (logErr) { /* ignore logging error */ }
+    
+    // Attempt to email admin about the crash
+    try {
+      var adminEmail = Session.getEffectiveUser().getEmail();
+      if (adminEmail) {
+        MailApp.sendEmail({
+          to: adminEmail,
+          subject: '[CrewLife] doGet CRASH at step ' + step,
+          body: 'TraceId: ' + (traceId || 'none') + '\n' +
+                'Step: ' + step + '\n' +
+                'Error: ' + errMsg + '\n' +
+                'Stack: ' + errStack + '\n' +
+                'StepLog: ' + JSON.stringify(stepLog, null, 2)
+        });
+      }
+    } catch (mailErr) { /* ignore mail error */ }
+    
+    // ALWAYS return a styled error page - NEVER blank
+    return createHardcodedErrorPage_(
+      'System Error',
+      'An unexpected error occurred at step: ' + step + '. Please try again or contact support.',
+      traceId || 'unknown',
+      errMsg
+    );
   }
+}
+
+/**
+ * Create a hardcoded error page that doesn't depend on any templates.
+ * Used as ultimate fallback to NEVER show a blank page.
+ * @param {string} title - Error title
+ * @param {string} message - Error message
+ * @param {string} traceId - Trace ID
+ * @param {string=} detail - Optional technical detail
+ * @returns {HtmlOutput}
+ */
+function createHardcodedErrorPage_(title, message, traceId, detail) {
+  var html = '<!DOCTYPE html><html><head><meta charset="utf-8">' +
+    '<meta name="viewport" content="width=device-width, initial-scale=1">' +
+    '<title>Error - ' + title + '</title>' +
+    '<style>body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;background:#f5f5f5;margin:0;padding:40px 20px;text-align:center;}' +
+    '.card{background:#fff;border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,0.1);max-width:480px;margin:0 auto;padding:40px;}' +
+    '.icon{font-size:64px;margin-bottom:20px;}' +
+    'h1{color:#d32f2f;margin:0 0 16px;}' +
+    'p{color:#666;line-height:1.6;margin:0 0 20px;}' +
+    '.trace{font-size:12px;color:#999;margin-top:30px;padding-top:20px;border-top:1px solid #eee;}' +
+    '.detail{font-size:11px;color:#999;word-break:break-all;margin-top:10px;}' +
+    'a{color:#1976d2;}</style></head><body>' +
+    '<div class="card"><div class="icon">⚠️</div>' +
+    '<h1>' + title + '</h1>' +
+    '<p>' + message + '</p>' +
+    '<p><a href="' + (typeof CANONICAL_EXEC_URL !== 'undefined' ? CANONICAL_EXEC_URL : '') + '">Return to Start</a></p>' +
+    '<div class="trace">Trace ID: ' + traceId + '</div>' +
+    (detail ? '<div class="detail">' + detail.substring(0, 200) + '</div>' : '') +
+    '</div></body></html>';
+  
+  return HtmlService.createHtmlOutput(html)
+    .setTitle('Error - ' + title)
+    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
 
 /**
@@ -183,6 +280,25 @@ function serveDiagPage_(brand, traceId) {
   var results = [];
   var ok = true;
   
+  // 0. Build info and canonical URL
+  try {
+    var buildId = typeof BUILD_ID !== 'undefined' ? BUILD_ID : 'unknown';
+    var canonicalUrl = typeof CANONICAL_EXEC_URL !== 'undefined' ? CANONICAL_EXEC_URL : 'not set';
+    results.push({ test: 'Build ID', ok: true, detail: buildId });
+    results.push({ test: 'CANONICAL_EXEC_URL', ok: canonicalUrl.indexOf('/exec') !== -1, detail: canonicalUrl });
+  } catch (e) {
+    results.push({ test: 'Build Info', ok: false, detail: String(e) });
+  }
+  
+  // 0b. Script Property WEB_APP_EXEC_URL
+  try {
+    var props = PropertiesService.getScriptProperties();
+    var propUrl = props.getProperty('WEB_APP_EXEC_URL') || '(not set)';
+    results.push({ test: 'WEB_APP_EXEC_URL (prop)', ok: propUrl !== '(not set)', detail: propUrl });
+  } catch (e) {
+    results.push({ test: 'WEB_APP_EXEC_URL (prop)', ok: false, detail: String(e) });
+  }
+  
   // 1. Config sheet accessible
   try {
     var ss = getConfigSheet_();
@@ -192,12 +308,14 @@ function serveDiagPage_(brand, traceId) {
     ok = false;
   }
   
-  // 2. TOKENS sheet and headers
+  // 2. TOKENS sheet and headers (with detected header list)
+  var detectedHeaders = [];
   try {
     var ss = getConfigSheet_();
     var sheet = ss.getSheetByName('TOKENS');
     if (!sheet) throw new Error('TOKENS sheet missing');
     var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+    detectedHeaders = headers.filter(function(h) { return h !== ''; });
     var expected = ['Token', 'Email', 'Email Hash', 'Text For Email', 'Brand', 'CL Code', 'Status', 'Expiry', 'Created At', 'Used At', 'Issued By', 'Trace ID', 'OTP', 'Attempts'];
     var missing = [];
     for (var i = 0; i < expected.length; i++) {
@@ -209,19 +327,20 @@ function serveDiagPage_(brand, traceId) {
     } else {
       results.push({ test: 'TOKENS Headers', ok: true, detail: 'All ' + expected.length + ' headers present' });
     }
+    results.push({ test: 'Detected Headers', ok: true, detail: detectedHeaders.join(', ') });
   } catch (e) {
     results.push({ test: 'TOKENS Headers', ok: false, detail: String(e) });
     ok = false;
   }
   
-  // 3. Web app URL check
+  // 3. Web app URL check (resolved)
   try {
     var url = getWebAppUrl_();
     var isExec = url.indexOf('/exec') !== -1;
-    results.push({ test: 'Web App URL', ok: isExec, detail: url.substring(0, 80) + (isExec ? '' : ' WARNING: not /exec') });
+    results.push({ test: 'getWebAppUrl_()', ok: isExec, detail: url + (isExec ? '' : ' WARNING: not /exec') });
     if (!isExec) ok = false;
   } catch (e) {
-    results.push({ test: 'Web App URL', ok: false, detail: String(e) });
+    results.push({ test: 'getWebAppUrl_()', ok: false, detail: String(e) });
     ok = false;
   }
   
@@ -254,7 +373,7 @@ function serveDiagPage_(brand, traceId) {
   }
   
   // Build HTML output
-  var html = '<html><head><meta charset="utf-8"><title>Diagnostics</title><style>body{font-family:sans-serif;padding:20px;}table{border-collapse:collapse;width:100%;}th,td{border:1px solid #ccc;padding:8px;text-align:left;}.ok{color:green;}.fail{color:red;font-weight:bold;}</style></head><body>';
+  var html = '<html><head><meta charset="utf-8"><title>Diagnostics</title><style>body{font-family:sans-serif;padding:20px;}table{border-collapse:collapse;width:100%;}th,td{border:1px solid #ccc;padding:8px;text-align:left;word-break:break-all;}.ok{color:green;}.fail{color:red;font-weight:bold;}</style></head><body>';
   html += '<h1>System Diagnostics</h1>';
   html += '<p>Trace ID: <code>' + traceId + '</code></p>';
   html += '<table><tr><th>Test</th><th>Status</th><th>Detail</th></tr>';

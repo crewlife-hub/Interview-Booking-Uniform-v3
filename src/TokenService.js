@@ -207,6 +207,9 @@ function confirmTokenAndMarkUsed_(token, traceId) {
   // Mark as USED
   sheet.getRange(validation.rowIndex, statusIdx + 1).setValue(TOKEN_STATUS.USED);
   sheet.getRange(validation.rowIndex, usedAtIdx + 1).setValue(new Date());
+  // Mark as LOCKED in column AB (28)
+  sheet.getRange(validation.rowIndex, 28).setValue('LOCKED');
+  Logger.log('[INVITE_LOCK] row=%s set LOCKED (AB)', validation.rowIndex);
   
   logEvent_(traceId, validation.brand, '', 'TOKEN_USED', {
     token: token.substring(0, 8) + '...',
@@ -548,6 +551,9 @@ function consumeTokenForRedirect_(token, traceId) {
     if (idx['Used At'] !== undefined) {
       sheet.getRange(sheetRow, idx['Used At'] + 1).setValue(new Date());
     }
+    // Mark as LOCKED in column AB (28)
+    sheet.getRange(sheetRow, 28).setValue('LOCKED');
+    Logger.log('[INVITE_LOCK] row=%s set LOCKED (AB)', sheetRow);
 
     logEvent_(traceId, brand, '', 'TOKEN_CONSUMED', {
       token: token.substring(0, 8) + '...',

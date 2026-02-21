@@ -247,74 +247,102 @@ function startOtpByBrandCl_(params, traceId) {
  * Public entry point from BrandSelector.html via google.script.run.
  * Validates candidate against Smartsheet (brand-locked), creates OTP, sends email.
  * Does NOT call TokenService.issueToken_ — uses OtpService.createOtp_ only.
+ * BULLETPROOF: Wrapped in try/catch to NEVER cause blank screen.
  * @param {Object} params  { brand, email, textForEmail }
  * @param {string} traceId
  * @returns {{ ok:boolean, verifyUrl?:string, expiryMinutes?:number, error?:string }}
  */
 function startOtpByTextForEmail(params, traceId) {
-  traceId          = traceId || generateTraceId_();
-  var brand        = String(params.brand        || '').toUpperCase().trim();
-  var email        = String(params.email        || '').toLowerCase().trim();
-  var textForEmail = String(params.textForEmail || '').trim();
+  try {
+    traceId          = traceId || generateTraceId_();
+    var brand        = String(params.brand        || '').toUpperCase().trim();
+    var email        = String(params.email        || '').toLowerCase().trim();
+    var textForEmail = String(params.textForEmail || '').trim();
 
-  if (!brand || !email || !textForEmail) {
-    return { ok: false, error: 'Missing required fields (brand, email, textForEmail).' };
+    if (!brand || !email || !textForEmail) {
+      return { ok: false, error: 'Missing required fields (brand, email, textForEmail).' };
+    }
+    if (!isValidBrand_(brand)) {
+      return { ok: false, error: 'Unknown brand: ' + brand };
+    }
+
+    // 0. Pre-check: Verify TOKENS sheet is accessible
+    try {
+      var ss = getConfigSheet_();
+      var tokenSheet = ss.getSheetByName('TOKENS');
+      if (!tokenSheet) {
+        Logger.log('[startOtpByTextForEmail] TOKENS sheet not found');
+        return { ok: false, error: 'System configuration error. Please contact support.' };
+      }
+    } catch (sheetErr) {
+      Logger.log('[startOtpByTextForEmail] Cannot access TOKENS sheet: ' + sheetErr);
+      return { ok: false, error: 'System temporarily unavailable. Please try again later.' };
+    }
+
+    // 1. Validate candidate against Smartsheet (brand-locked, ANY-sheet match)
+    var searchResult = searchCandidateInSmartsheet_(brand, email, textForEmail);
+    if (!searchResult.ok) {
+      return { ok: false, error: 'Could not verify candidate. Please try again later.' };
+    }
+    if (!searchResult.found || !searchResult.exactMatch) {
+      return { ok: false, error: 'Your email and selected position do not match our records.' };
+    }
+
+    // 2. Attach Interview Link to candidate so createOtp_ stores it as Position Link
+    var candidate = searchResult.candidate || {};
+    candidate['Position Link'] = searchResult.interviewLink || '';
+
+    // 3. Create OTP (single call — writes token row with Position Link)
+    var otpResult = createOtp_({
+      email:        email,
+      brand:        brand,
+      textForEmail: textForEmail,
+      traceId:      traceId,
+      candidate:    candidate
+    });
+    if (!otpResult.ok) {
+      return { ok: false, error: otpResult.error || 'OTP generation failed.' };
+    }
+
+    // 4. Send OTP email (exactly once)
+    var emailResult = sendOtpEmail_({
+      email:         email,
+      otp:           otpResult.otp,
+      brand:         brand,
+      textForEmail:  textForEmail,
+      token:         otpResult.token,
+      expiryMinutes: otpResult.expiryMinutes,
+      traceId:       traceId
+    });
+    if (!emailResult.ok) {
+      return { ok: false, error: emailResult.error || 'Failed to send OTP email.' };
+    }
+
+    logEvent_(traceId, brand, email, 'OTP_START_SUCCESS', {
+      matchedSheetId:   searchResult.matchedSheetId || '',
+      hasInterviewLink: !!(searchResult.interviewLink)
+    });
+
+    var verifyUrl = getWebAppUrl_() +
+      '?page=verify&brand=' + encodeURIComponent(brand) +
+      '&e='     + encodeURIComponent(email) +
+      '&t='     + encodeURIComponent(textForEmail) +
+      '&token=' + encodeURIComponent(otpResult.token);
+
+    return { ok: true, token: otpResult.token, verifyUrl: verifyUrl, expiryMinutes: otpResult.expiryMinutes };
+  
+  } catch (err) {
+    // BULLETPROOF: Log and return structured error - NEVER throw
+    var errMsg = String(err);
+    Logger.log('[startOtpByTextForEmail] FATAL ERROR: ' + errMsg + '\nStack: ' + (err.stack || 'none'));
+    try {
+      logEvent_(traceId || 'NO_TRACE', params.brand || '', params.email || '', 'OTP_START_FATAL_ERROR', {
+        error: errMsg,
+        stack: err.stack || ''
+      });
+    } catch (logErr) { /* ignore */ }
+    return { ok: false, error: 'An unexpected error occurred. Please try again or contact support.' };
   }
-  if (!isValidBrand_(brand)) {
-    return { ok: false, error: 'Unknown brand: ' + brand };
-  }
-
-  // 1. Validate candidate against Smartsheet (brand-locked, ANY-sheet match)
-  var searchResult = searchCandidateInSmartsheet_(brand, email, textForEmail);
-  if (!searchResult.ok) {
-    return { ok: false, error: 'Could not verify candidate. Please try again later.' };
-  }
-  if (!searchResult.found || !searchResult.exactMatch) {
-    return { ok: false, error: 'Your email and selected position do not match our records.' };
-  }
-
-  // 2. Attach Interview Link to candidate so createOtp_ stores it as Position Link
-  var candidate = searchResult.candidate || {};
-  candidate['Position Link'] = searchResult.interviewLink || '';
-
-  // 3. Create OTP (single call — writes token row with Position Link)
-  var otpResult = createOtp_({
-    email:        email,
-    brand:        brand,
-    textForEmail: textForEmail,
-    traceId:      traceId,
-    candidate:    candidate
-  });
-  if (!otpResult.ok) {
-    return { ok: false, error: otpResult.error || 'OTP generation failed.' };
-  }
-
-  // 4. Send OTP email (exactly once)
-  var emailResult = sendOtpEmail_({
-    email:         email,
-    otp:           otpResult.otp,
-    brand:         brand,
-    textForEmail:  textForEmail,
-    token:         otpResult.token,
-    expiryMinutes: otpResult.expiryMinutes,
-    traceId:       traceId
-  });
-  if (!emailResult.ok) {
-    return { ok: false, error: emailResult.error || 'Failed to send OTP email.' };
-  }
-
-  logEvent_(traceId, brand, email, 'OTP_START_SUCCESS', {
-    matchedSheetId:   searchResult.matchedSheetId || '',
-    hasInterviewLink: !!(searchResult.interviewLink)
-  });
-
-  var verifyUrl = getWebAppUrl_() +
-    '?page=verify&brand=' + encodeURIComponent(brand) +
-    '&e='     + encodeURIComponent(email) +
-    '&t='     + encodeURIComponent(textForEmail) +
-    '&token=' + encodeURIComponent(otpResult.token);
-
-  return { ok: true, token: otpResult.token, verifyUrl: verifyUrl, expiryMinutes: otpResult.expiryMinutes };
 }
 
 /**

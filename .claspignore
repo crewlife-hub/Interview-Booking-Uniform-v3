@@ -1,5 +1,17 @@
-# Prevent duplicate server-side definitions: we deploy the .js files only
-Interview-Booking-Uniform-v3-main/src/**/*.gs
+**/.git/**
+**/.gitignore
+**/.clasp.json
+**/node_modules/**
+**/package.json
+**/package-lock.json
+**/README.md
+**/TEST.md
+**/staged-merge-*/**
+**/temp_gs/**
+**/*.bak
 
-# Ignore staged merge snapshots
-Interview-Booking-Uniform-v3-main/staged-merge-*/**
+# Prevent duplicate server-side definitions: we deploy the .js files only
+**/*.gs
+
+# Ignore upstream mirror folder (keep clasp pushes clean)
+Interview-Booking-Uniform-v3-main/**
