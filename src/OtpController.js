@@ -105,6 +105,13 @@ function handleOtpRequest_(params, traceId) {
   });
   
   if (!otpResult.ok) {
+    if (otpResult.code === 'INVITE_BLOCKED') {
+      return {
+        ok: false,
+        code: 'INVITE_BLOCKED',
+        error: 'This invite has already been used. Please request a new invite from Crew Life at Sea.'
+      };
+    }
     return { ok: false, error: otpResult.error };
   }
   
@@ -228,7 +235,12 @@ function startOtpByBrandCl_(params, traceId) {
 
   // Create OTP
   var otpResult = createOtp_({ email: email, brand: brand, textForEmail: textForEmail, traceId: traceId });
-  if (!otpResult.ok) return { ok: false, error: otpResult.error };
+  if (!otpResult.ok) {
+    if (otpResult.code === 'INVITE_BLOCKED') {
+      return { ok: false, code: 'INVITE_BLOCKED', error: 'This invite has already been used. Please request a new invite from Crew Life at Sea.' };
+    }
+    return { ok: false, error: otpResult.error };
+  }
 
   // Send OTP email with token
   var emailResult = sendOtpEmail_({ email: email, otp: otpResult.otp, brand: brand, textForEmail: textForEmail, token: otpResult.token, expiryMinutes: otpResult.expiryMinutes, traceId: traceId });
@@ -301,6 +313,9 @@ function startOtpByTextForEmail(params, traceId) {
       candidate:    candidate
     });
     if (!otpResult.ok) {
+      if (otpResult.code === 'INVITE_BLOCKED') {
+        return { ok: false, code: 'INVITE_BLOCKED', error: 'This invite has already been used. Please request a new invite from Crew Life at Sea.' };
+      }
       return { ok: false, error: otpResult.error || 'OTP generation failed.' };
     }
 

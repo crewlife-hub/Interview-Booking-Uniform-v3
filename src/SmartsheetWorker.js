@@ -287,6 +287,17 @@ function processSidewaysInvites_(opts) {
             textForEmail: textForEmail,
             traceId: traceId
           });
+          if (!otpCreated.ok) {
+            if (otpCreated.code === 'INVITE_BLOCKED') {
+              Logger.log('[SIDEWAYS_SKIP_INVITE_BLOCKED] rowId=%s brand=%s email=%s', row.id, brand, candidateEmailNorm);
+              logEvent_(traceId, brand, candidateEmailNorm, 'SIDEWAYS_INVITE_BLOCKED', {
+                rowId: row.id,
+                reason: otpCreated.reason || 'USED_OR_LOCKED'
+              });
+              results.skipped++;
+              continue;
+            }
+          }
           if (!otpCreated.ok || !otpCreated.token) {
             logEvent_(traceId, brand, candidateEmailNorm, 'SIDEWAYS_TOKEN_CREATE_FAILED', { rowId: row.id, error: otpCreated.error || 'unknown' });
             results.errors.push({ rowId: row.id, error: 'Token creation failed: ' + (otpCreated.error || 'unknown') });
